@@ -1,0 +1,13 @@
+cradle:
+  cabal:
+    - path: "tony-zorks-rogue-skater/src"
+      component: "executable:tony-zorks-rogue-skater"
+
+    - path: "solitude"
+      component: "lib:solitude"
+
+    - path: "breadcrumbs"
+      component: "lib:breadcrumbs"
+
+    - path: "bearmonadterminal"
+      component: "lib:bearmonadterminal"

@@ -1,0 +1,25 @@
+source-repository-package
+  type: git
+  location: https://github.com/haskell-effectful/effectful.git
+  tag: a235b074cd68d770cbe732dc2a65067ff0c754f5
+  subdir: effectful-core
+  subdir: effectful-plugin
+  subdir: effectful-th
+  subdir: effectful
+source-repository-package
+  type: git
+  location: https://github.com/PPKFS/breadcrumbs.git
+  tag: 60093b23ad22302da6ff8e83863a1ee759b229d4
+source-repository-package
+  type: git
+  location: https://github.com/PPKFS/solitude.git
+  tag: bcfd36ec733e4b046fdf89288730b85feef27900
+packages:
+  tony-zorks-rogue-skater/tony-zorks-rogue-skater.cabal
+  bearmonadterminal/bearmonadterminal.cabal
+
+-- documentation: true
+-- haddock-internal: true
+-- haddock-hoogle: true
+-- haddock-html: true
+-- haddock-hyperlink-source: true
