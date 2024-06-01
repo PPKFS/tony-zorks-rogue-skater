@@ -23,6 +23,7 @@ common common-options
     , text
     , bytestring
     , mtl
+    , unliftio
   ghc-options:
     -Wall -Wcompat -Widentities -Wredundant-constraints
     -Wno-unused-packages -Wno-deprecations -fhide-source-paths

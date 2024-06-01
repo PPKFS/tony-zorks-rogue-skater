@@ -1,6 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 
-module Yaifl.Model.Action
+module TZRS.Action
   ( Action(..)
   , ActionRulebook
   , ActionRule

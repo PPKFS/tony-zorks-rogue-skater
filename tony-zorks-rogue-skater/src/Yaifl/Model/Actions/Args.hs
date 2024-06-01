@@ -143,19 +143,6 @@ data Args wm v = Args
 instance Display (Args wm v) where
   displayBuilder = const "args"
 
--- | All of the objects in the arguments are READ-ONLY. Whilst they can be swapped out, the
--- refreshVariables function is called to replace and update the objects
-class Refreshable wm av where
-  refreshVariables :: forall es. (NoMissingObjects wm es) => av -> Eff es av
-
-instance {-# OVERLAPPABLE #-} Refreshable wm av where
-  refreshVariables = pure
-
-instance {-# OVERLAPPING #-} Refreshable wm v => Refreshable wm (Args wm v) where
-  refreshVariables av = do
-    v <- refreshVariables (variables av)
-    o <- getThing (tagThing $ source av)
-    return $ av { source = o, variables = v }
 
 type ArgumentParseResult v = Either Text v
 

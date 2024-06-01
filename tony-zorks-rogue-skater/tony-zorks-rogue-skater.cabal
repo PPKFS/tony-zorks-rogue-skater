@@ -25,18 +25,12 @@ common common-options
     effectful-core >= 2.3.0 && < 3.4,
     effectful-plugin >= 1.1.0 && < 2.2,
     effectful-th >= 1.0.0 && < 2.1,
-    enummapset >= 0.7.2 && < 1.8,
     text >= 2.0.2 && < 3.1,
-    haskell-src-exts >= 1.23.1 && < 2.0,
-    haskell-src-meta >= 0.8.13 && < 2.0,
-    megaparsec >= 9.6.1 && < 10.0,
     named >= 0.3.0 && < 1.0,
-    prettyprinter >= 1.7.1 && < 3.0,
-    prettyprinter-ansi-terminal >= 1.1.3 && < 2.0,
-    split >= 0.2.4 && < 2.0,
     text-display >= 0.0.5 && < 1.0,
     breadcrumbs >= 1.0.0.0 && <= 10.0.0.0,
-    solitude >= 0.0.0.0 && <= 10.0.0.0
+    solitude >= 0.0.0.0 && <= 10.0.0.0,
+    bearmonadterminal
 
   ghc-options:
     -Wall -Wcompat -Widentities -Wredundant-constraints
@@ -74,6 +68,8 @@ executable tony-zorks-rogue-skater
   other-modules:
     TZRS.Prelude
     TZRS.Entity
+    TZRS.RuleEffects
+    TZRS.Rulebook
 
   build-depends:
     , effectful-th
