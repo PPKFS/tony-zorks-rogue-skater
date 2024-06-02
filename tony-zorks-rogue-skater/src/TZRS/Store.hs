@@ -1,21 +1,12 @@
-{-|
-Module      : Yaifl.Model.Objects.Store
-Copyright   : (c) Avery 2023
-License     : MIT
-Maintainer  : ppkfs@outlook.com
 
-A small wrapper around `EM.EnumMap`s specialised for `Entity`; mostly this needs extra
-work to get `At` and `Ixed` instances working through the newtype wrappers.
--}
-
-module Yaifl.Model.Store
+module TZRS.Store
   ( -- * Stores
     Store(..)
   , emptyStore
   ) where
 
-import Solitude
-import Yaifl.Model.Entity
+import TZRS.Prelude
+import TZRS.Entity
 import qualified Data.EnumMap as EM
 import qualified Data.IntMap as IM
 

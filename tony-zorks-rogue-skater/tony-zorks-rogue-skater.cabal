@@ -31,7 +31,9 @@ common common-options
     breadcrumbs >= 1.0.0.0 && <= 10.0.0.0,
     solitude >= 0.0.0.0 && <= 10.0.0.0,
     bearmonadterminal,
-    linear
+    enummapset,
+    vector,
+    random
 
   ghc-options:
     -Wall -Wcompat -Widentities -Wredundant-constraints
@@ -71,3 +73,5 @@ executable tony-zorks-rogue-skater
     TZRS.Entity
     TZRS.RuleEffects
     TZRS.Rulebook
+    TZRS.Object
+    TZRS.Store
