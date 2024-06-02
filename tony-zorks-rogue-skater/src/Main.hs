@@ -3,27 +3,70 @@ module Main where
 import TZRS.Prelude
 import BearLibTerminal.Raw
 import BearMonadTerminal
+import qualified Data.Map.Strict as M
 
 screenSize :: (Int, Int)
 screenSize = (175, 35)
 
 main :: IO ()
-main = liftIO $ withWindow
-  defaultWindowOptions { size = Just screenSize }
-  (do
-    terminalSetText "log: file='awa.log', level=trace;"
-    terminalSetText "font: '../../../usr/share/fonts/TTF/IosevkaNerdFontMono-Medium.ttf', size=24"
-  )
-  (const runLoop)
-  pass
+main = runEff $ evalStateShared defaultMetadata $ do
+  withWindow
+    defaultWindowOptions { size = Just screenSize }
+    (do
+      terminalSetText "log: file='awa.log', level=trace;"
+      terminalSetText "font: '../../../usr/share/fonts/TTF/IosevkaNerdFontMono-Medium.ttf', size=24"
+    )
+    (const runLoop)
+    pass
 
-runLoop :: MonadIO m => m ()
+type Point = (Int, Int)
+
+defaultMetadata :: Metadata
+defaultMetadata = Metadata False (fst screenSize `div` 2, snd screenSize `div` 2)
+
+data Metadata = Metadata
+  { pendingQuit :: Bool
+  , playerLocation :: Point
+  } deriving stock (Generic, Show)
+
+data Direction = LeftDir | RightDir | UpDir | DownDir
+
+movementKeys :: M.Map Keycode Direction
+movementKeys = M.fromList
+  [ (TkA, LeftDir)
+  , (TkS, DownDir)
+  , (TkW, UpDir)
+  , (TkD, RightDir)
+  ]
+
+asMovement :: Keycode -> Maybe Direction
+asMovement k = k `M.lookup` movementKeys
+
+movePlayer ::
+  State Metadata :> es
+  => Direction
+  -> Eff es ()
+movePlayer = \case
+  LeftDir -> #playerLocation % _1 %= flip (-) 1
+  RightDir -> #playerLocation % _1 %= (+1)
+  UpDir -> #playerLocation % _2 %= flip (-) 1
+  DownDir -> #playerLocation % _2 %= (+1)
+
+runLoop ::
+  State Metadata :> es
+  => IOE :> es
+  => Eff es ()
 runLoop = do
   terminalClear
-  terminalPrintText (fst screenSize `div` 2) (snd screenSize `div` 2) "@"
+  pl <- use #playerLocation
+  terminalPrintText (pl ^. _1) (pl ^. _2) "@"
   terminalRefresh
   handleEvents Blocking $ \case
-    Keypress kp -> putStrLn ("you pressed " <> show kp) >> return True
-    WindowEvent Resize -> pass\
-    WindowEvent WindowClose -> return False
-  if and r then runLoop else pass
+    Keypress kp -> do
+      putStrLn $ "Handling keypress: " <> show kp
+      case asMovement kp of
+        Just mvDir -> movePlayer mvDir
+        Nothing -> putStrLn ("unknown keypress: " <> show kp)
+    WindowEvent Resize -> pass
+    WindowEvent WindowClose -> #pendingQuit .= True
+  ifM (use #pendingQuit) pass runLoop

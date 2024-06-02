@@ -30,7 +30,8 @@ common common-options
     text-display >= 0.0.5 && < 1.0,
     breadcrumbs >= 1.0.0.0 && <= 10.0.0.0,
     solitude >= 0.0.0.0 && <= 10.0.0.0,
-    bearmonadterminal
+    bearmonadterminal,
+    linear
 
   ghc-options:
     -Wall -Wcompat -Widentities -Wredundant-constraints
@@ -70,13 +71,3 @@ executable tony-zorks-rogue-skater
     TZRS.Entity
     TZRS.RuleEffects
     TZRS.Rulebook
-
-  build-depends:
-    , effectful-th
-    , enummapset
-    , haskell-src-exts
-    , haskell-src-meta
-    , megaparsec
-    , prettyprinter
-    , prettyprinter-ansi-terminal
-    , split
