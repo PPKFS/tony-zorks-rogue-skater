@@ -1,18 +1,39 @@
-module TZRS.RuleEffects
-  ( RuleEffects
-  , ActionHandler(..)
-  , parseAction
-  , RuleEffectStack
-  ) where
+module TZRS.RuleEffects where
 
 import Solitude
 
 import Breadcrumbs ( Breadcrumbs )
 import Effectful.TH ( makeEffect )
 import Effectful.Writer.Static.Local
+import TZRS.Store
+import TZRS.Object
+import qualified Data.Vector.Unboxed as V
 data Action a b c
 data ActionCollection
-data Metadata
+
+data World = World
+  { objects :: Store Object
+  , tileMap :: TileMap
+  } deriving stock (Generic)
+
+data TileInfo = TileInfo
+  { name :: Text
+  , renderable :: Renderable
+  , walkable :: Bool
+  } deriving stock (Generic, Show)
+
+data TileMap = TileMap
+  { tileKinds :: IntMap TileInfo
+  , tileMap :: V.Vector Int
+  , dimensions :: (Int, Int)
+  } deriving stock (Generic, Show)
+
+data Metadata = Metadata
+  { pendingQuit :: Bool
+  } deriving stock (Generic, Show)
+
+makeFieldLabelsNoPrefix ''World
+makeFieldLabelsNoPrefix ''Metadata
 
 
 data ActionHandler :: Effect where
@@ -22,6 +43,7 @@ makeEffect ''ActionHandler
 
 type RuleEffects es = (
   State Metadata :> es
+  , State World :> es
   , Breadcrumbs :> es
   )
 

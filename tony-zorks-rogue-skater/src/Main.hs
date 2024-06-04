@@ -3,6 +3,12 @@ module Main where
 import TZRS.Prelude
 import TZRS.Object
 import BearLibTerminal.Raw
+    ( terminalBkColorUInt,
+      terminalClear,
+      terminalColorUInt,
+      terminalPrintText,
+      terminalRefresh,
+      terminalSetText )
 import BearMonadTerminal
 import qualified Data.Map.Strict as M
 import TZRS.Store
@@ -13,35 +19,34 @@ import qualified Data.Vector.Unboxed as V
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
 import System.Random
+import TZRS.Rulebook
+import TZRS.RuleEffects
+import TZRS.Run
+import Breadcrumbs
 
 screenSize :: (Int, Int)
-screenSize = (175, 35)
+screenSize = (100, 60)
 
-data World = World
-  { objects :: Store Object
-  , tileMap :: TileMap
-  } deriving stock (Generic)
+data Rectangle = Rectangle
+  { topLeft :: Position
+  , bottomRight :: Position
+  } deriving stock (Show, Generic)
 
-data TileInfo = TileInfo
-  { renderable :: Renderable
-  } deriving stock (Generic, Show)
+rectanglesIntersect ::
+  Rectangle
+  -> Rectangle
+  -> Bool
+rectanglesIntersect r1 r2 = not $
+    ((r1 ^. #topLeft % #x >= r2 ^. #bottomRight % #x) || (r2 ^. #topLeft % #x >= r1 ^. #bottomRight % #x))
+    ||
+    ((r1 ^. #topLeft % #y >= r2 ^. #bottomRight % #y) || (r2 ^. #topLeft % #y >= r1 ^. #bottomRight % #y))
 
-data TileMap = TileMap
-  { tileKinds :: IntMap TileInfo
-  , tileMap :: V.Vector Int
-  , dimensions :: (Int, Int)
-  } deriving stock (Generic, Show)
-
-data Metadata = Metadata
-  { pendingQuit :: Bool
-  } deriving stock (Generic, Show)
-
-makeFieldLabelsNoPrefix ''World
-makeFieldLabelsNoPrefix ''Metadata
+centre :: Rectangle -> Position
+centre (Rectangle (Position x1 y1) (Position x2 y2))= Position ((x1+x2) `div` 2) ((y1+y2) `div` 2)
 main :: IO ()
-main = runEff $
+main = runEff $ runBreadcrumbs Nothing $
   evalStateShared defaultMetadata $ do
-    w <- uncurry randomMap screenSize
+    w <- uncurry roomMap screenSize
     evalStateShared (World emptyStore w) $ do
       ((%=) @_ @World) (#objects % coerced) $ EM.insert playerId (Object
         { name = "player"
@@ -50,7 +55,7 @@ main = runEff $
         , objectType = ObjectKind "player"
         , creationTime = Timestamp 0
         , modifiedTime = Timestamp 0
-        , position = Position 10 10
+        , position = Position 20 15
         , renderable = Renderable '@' (Colour 0xFFF33FFF) (Colour 0x00000000)
         , objectData = ObjectSpecifics
         })
@@ -58,7 +63,7 @@ main = runEff $
         defaultWindowOptions { size = Just screenSize }
         (do
           terminalSetText "log: file='awa.log', level=trace;"
-          terminalSetText "font: '../../../usr/share/fonts/TTF/IosevkaNerdFontMono-Medium.ttf', size=24"
+          terminalSetText "font: 'Boxy.ttf', size=24"
         )
         (const runLoop)
         pass
@@ -75,10 +80,10 @@ playerId = Entity 0
 
 defaultTileKinds :: IntMap TileInfo
 defaultTileKinds = IM.fromList $ zip [0..]
-  [ TileInfo (Renderable '.' (Colour 0xFF313036) (Colour 0x00000000))
-  , TileInfo (Renderable '#' (Colour 0xFFb9caee) (Colour 0x00000000))
-
+  [ TileInfo "floor" (Renderable '.' (Colour 0xFF313036) (Colour 0x00000000)) True
+  , TileInfo "wall" (Renderable '#' (Colour 0xFFb9caee) (Colour 0x00000000)) False
   ]
+
 movementKeys :: M.Map Keycode Direction
 movementKeys = M.fromList
   [ (TkA, LeftDir)
@@ -94,6 +99,54 @@ asMovement k = k `M.lookup` movementKeys
 
 indexToCoord :: Int -> Int -> (Int, Int)
 indexToCoord w i = (i `mod` w, i `div` w)
+
+coordToIndex :: Int -> Position -> Int
+coordToIndex w p = (view #y p)*w + (view #x p)
+
+data MoveArguments = MoveArguments
+  { object :: Object
+  , direction :: Direction
+  }
+
+instance Display MoveArguments where
+  displayBuilder _ = "move args"
+
+moveRulebook :: Rulebook Unconstrained MoveArguments Bool
+moveRulebook = (blankRulebook "move rulebook")
+  { rules =
+      [ cantMoveIntoWalls
+      , moveIt
+      ]
+  }
+
+cantMoveIntoWalls :: Rule Unconstrained MoveArguments Bool
+cantMoveIntoWalls = makeRule "can't walk into walls rule" [] $ \ma -> do
+  let newLoc = calculateNewLocation (object ma) (direction ma)
+  tm <- use @World #tileMap
+  let ti = getTileInfo tm newLoc
+  if walkable ti then rulePass else do
+    traceShow "nope can't walk through a wall" pass
+    return (Just False)
+
+calculateNewLocation :: Object -> Direction -> Position
+calculateNewLocation o dir = (o ^. #position) &
+    (case dir of
+      LeftDir -> _1 %~ subtract 1
+      RightDir -> _1 %~ (+1)
+      UpDir -> _2 %~ subtract 1
+      DownDir -> _2 %~ (+1)
+    )
+
+getTileInfo :: TileMap -> Position -> TileInfo
+getTileInfo tm pos =
+  let ti = (view #tileMap tm) V.! coordToIndex (view (#dimensions % _1) tm) (coerce pos)
+  in fromMaybe (error "") $ ti `IM.lookup` (tm ^. #tileKinds)
+
+moveIt :: Rule Unconstrained MoveArguments Bool
+moveIt = makeRule "move rule" [] $ \ma -> do
+  moveObject (getID $ object ma) (direction ma)
+  return (Just True)
+
 randomMap :: IOE :> es => Int -> Int -> Eff es TileMap
 randomMap w h = do
   let (wallId, floorId) = (1, 0)
@@ -106,18 +159,97 @@ randomMap w h = do
             (0, _) -> wallId
             (_, 0) -> wallId
             (x, y) -> if x == wMax || y == hMax || (i `IS.member` is) then wallId else floorId)
-  return TileMap
-    { tileKinds = defaultTileKinds
-    , tileMap = v
-    , dimensions = (w, h)
-    }
+  let t = TileMap
+        { tileKinds = defaultTileKinds
+        , tileMap = v
+        , dimensions = (w, h)
+        }
+  return t
 
-movePlayer ::
+roomMap :: IOE :> es => Int -> Int -> Eff es TileMap
+roomMap w h = do
+  let (wallId, floorId) = (1, 0)
+  let (wMax, hMax) = (w-1, h-1)
+  let v = V.generate (w*h) (const wallId)
+  let t = TileMap
+        { tileKinds = defaultTileKinds
+        , tileMap = v
+        , dimensions = (w, h)
+        }
+  let numRooms = 30
+      minSize = 6
+      maxSize = 10
+  allPossibleRooms <- mapM (const $ do
+
+    w' <- randomRIO (minSize, maxSize)
+    h' <- randomRIO (minSize, maxSize)
+    x <- subtract 1 <$> randomRIO (2, fst screenSize - w' - 1)
+    y <- subtract 1 <$> randomRIO (2, snd screenSize - h' - 1)
+    pure $ Rectangle (Position x y) (Position (x+w') (y+h')) ) [(0::Int)..numRooms]
+  return $ snd $ foldl'
+    (\(rooms, tm) newRoom ->
+      if any (rectanglesIntersect newRoom) rooms
+        then {- ignore -} (rooms, tm)
+        else
+          let updF = case rooms of
+                [] -> id
+                (lastRoom:_) ->
+                  let newP@(Position newX newY) = centre newRoom
+                      oldP@(Position prevX prevY) = centre lastRoom
+                  in
+                    if even (length rooms)
+                    then
+                      traceShow (mconcat ["digging horizontal first from ", show newP, show (newX - prevX), "then ", show oldP, show (newY - prevY)])
+                        $ digVerticalTunnel oldP (newY - prevY) . digHorizontalTunnel newP (prevX - newX)
+                    else
+                      traceShow (mconcat ["digging vertical first from ", show newP, show (prevY - newY), "then ", show oldP, show (newX - prevX)])
+                        $ digHorizontalTunnel oldP (newX - prevX) . digVerticalTunnel newP (prevY - newY)
+          in (newRoom:rooms, updF $ digRectangle newRoom tm)) ([], t) allPossibleRooms
+
+rectanglePoints ::
+  Rectangle
+  -> [Position]
+rectanglePoints r = do
+  x <- [(r ^. #topLeft % #x) .. (r ^. #bottomRight % #x)]
+  Position x <$> [(r ^. #topLeft % #y) .. (r ^. #bottomRight % #y)]
+
+digRectangle ::
+  Rectangle
+  -> TileMap
+  -> TileMap
+digRectangle r t =
+  let floorId = 0
+      width = t ^. #dimensions % _1
+  in
+    t & #tileMap %~ (\x -> x V.// map (\p -> (coordToIndex width p,floorId)) (rectanglePoints r))
+
+digHorizontalTunnel ::
+  Position
+  -> Int
+  -> TileMap
+  -> TileMap
+digHorizontalTunnel p l t =
+  let floorId = 0
+      width = t ^. #dimensions % _1
+  in t & #tileMap %~ (\x -> x V.// map (\i -> (coordToIndex width (p & #x %~ (+ if l > 0 then i else -i)),floorId)) [0..(abs l)] )
+
+digVerticalTunnel ::
+  Position
+  -> Int
+  -> TileMap
+  -> TileMap
+digVerticalTunnel p l t =
+  let floorId = 0
+      width = t ^. #dimensions % _1
+  in t & #tileMap %~ (\x -> x V.// map (\i -> (coordToIndex width (p & #y %~ (+ if l > 0 then i else -i)),floorId)) [0..(abs l)] )
+
+moveObject ::
   State World :> es
-  => Direction
+  => Entity
+  -> Direction
   -> Eff es ()
-movePlayer dir = do
-  #objects % at playerId % _Just % #position %=
+moveObject e dir = do
+  #objects % at e % _Just % #position %=
     (case dir of
       LeftDir -> _1 %~ subtract 1
       RightDir -> _1 %~ (+1)
@@ -128,6 +260,7 @@ movePlayer dir = do
 runLoop ::
   State World :> es
   => State Metadata :> es
+  => Breadcrumbs :> es
   => IOE :> es
   => Eff es ()
 runLoop = do
@@ -140,7 +273,9 @@ runLoop = do
     Keypress kp -> do
       putStrLn $ "Handling keypress: " <> show kp
       case asMovement kp of
-        Just mvDir -> movePlayer mvDir
+        Just mvDir -> do
+          pl <- use @World (#objects % at playerId)
+          void $ runRulebook Nothing moveRulebook (MoveArguments (fromMaybe (error "no player") pl) mvDir)
         Nothing -> putStrLn ("unknown keypress: " <> show kp)
     WindowEvent Resize -> pass
     WindowEvent WindowClose -> ((.=) @_ @Metadata) #pendingQuit True

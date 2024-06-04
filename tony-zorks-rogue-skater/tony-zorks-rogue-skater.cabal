@@ -75,3 +75,4 @@ executable tony-zorks-rogue-skater
     TZRS.Rulebook
     TZRS.Object
     TZRS.Store
+    TZRS.Run
