@@ -16,7 +16,7 @@ source-repository-package
   tag: bcfd36ec733e4b046fdf89288730b85feef27900
 packages:
   tony-zorks-rogue-skater/tony-zorks-rogue-skater.cabal
-  bearmonadterminal/bearmonadterminal.cabal
+  bearlibterminal-hs/bearlibterminal-hs.cabal
 
 -- documentation: true
 -- haddock-internal: true

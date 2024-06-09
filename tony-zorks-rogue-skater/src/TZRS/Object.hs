@@ -4,6 +4,7 @@ module TZRS.Object where
 import TZRS.Prelude
 
 import TZRS.Entity
+import TZRS.Geometry
 
 -- | Pointed set class; Monoid without the operation, or the dreaded default typeclass.
 class Pointed s where
@@ -28,17 +29,6 @@ type ObjectText = Text
 
 data ObjectSpecifics = ObjectSpecifics
 
-data Position = Position
-  { x :: Int
-  , y :: Int
-  } deriving stock (Show, Read, Generic)
-
-instance Field1 Position Position Int Int where
-  _1 = #x
-
-instance Field2 Position Position Int Int where
-  _2 = #y
-
 newtype Colour = Colour { toWord32 :: Word32 }
   deriving stock (Show, Read, Generic)
 
@@ -55,7 +45,7 @@ data Object = Object
   , objectType :: ObjectKind
   , creationTime :: Timestamp
   , modifiedTime :: Timestamp
-  , position :: Position
+  , position :: V2
   , renderable :: Renderable
   , objectData :: ObjectSpecifics
   } deriving stock (Generic)

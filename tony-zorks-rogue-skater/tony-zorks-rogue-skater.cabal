@@ -30,10 +30,13 @@ common common-options
     text-display >= 0.0.5 && < 1.0,
     breadcrumbs >= 1.0.0.0 && <= 10.0.0.0,
     solitude >= 0.0.0.0 && <= 10.0.0.0,
-    bearmonadterminal,
+    bearlibterminal-hs,
     enummapset,
+    mono-traversable,
     vector,
     random
+  extra-lib-dirs:
+    /Users/avery/tony-zorks-rogue-skater/bearlibterminal-hs/cbits
 
   ghc-options:
     -Wall -Wcompat -Widentities -Wredundant-constraints
@@ -71,8 +74,12 @@ executable tony-zorks-rogue-skater
   other-modules:
     TZRS.Prelude
     TZRS.Entity
+    TZRS.Geometry
+    TZRS.World
     TZRS.RuleEffects
     TZRS.Rulebook
     TZRS.Object
     TZRS.Store
     TZRS.Run
+  extra-lib-dirs:
+    /Users/avery/tony-zorks-rogue-skater

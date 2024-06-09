@@ -9,5 +9,5 @@ cradle:
     - path: "breadcrumbs"
       component: "lib:breadcrumbs"
 
-    - path: "bearmonadterminal"
-      component: "lib:bearmonadterminal"
+    - path: "bearlibterminal-hs"
+      component: "lib:bearlibterminal-hs"

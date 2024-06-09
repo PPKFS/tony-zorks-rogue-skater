@@ -9,7 +9,7 @@ import BearLibTerminal.Raw
       terminalPrintText,
       terminalRefresh,
       terminalSetText )
-import BearMonadTerminal
+import BearLibTerminal
 import qualified Data.Map.Strict as M
 import TZRS.Store
 import TZRS.Entity
@@ -23,13 +23,15 @@ import TZRS.Rulebook
 import TZRS.RuleEffects
 import TZRS.Run
 import Breadcrumbs
+import TZRS.World
+import TZRS.Geometry
 
 screenSize :: (Int, Int)
 screenSize = (100, 60)
 
 data Rectangle = Rectangle
-  { topLeft :: Position
-  , bottomRight :: Position
+  { topLeft :: V2
+  , bottomRight :: V2
   } deriving stock (Show, Generic)
 
 rectanglesIntersect ::
@@ -37,12 +39,13 @@ rectanglesIntersect ::
   -> Rectangle
   -> Bool
 rectanglesIntersect r1 r2 = not $
-    ((r1 ^. #topLeft % #x >= r2 ^. #bottomRight % #x) || (r2 ^. #topLeft % #x >= r1 ^. #bottomRight % #x))
+    ((r1 ^. #topLeft % _1 >= r2 ^. #bottomRight % _1) || (r2 ^. #topLeft % _1 >= r1 ^. #bottomRight % _1))
     ||
-    ((r1 ^. #topLeft % #y >= r2 ^. #bottomRight % #y) || (r2 ^. #topLeft % #y >= r1 ^. #bottomRight % #y))
+    ((r1 ^. #topLeft % _2 >= r2 ^. #bottomRight % _2) || (r2 ^. #topLeft % _2 >= r1 ^. #bottomRight % _2))
 
-centre :: Rectangle -> Position
-centre (Rectangle (Position x1 y1) (Position x2 y2))= Position ((x1+x2) `div` 2) ((y1+y2) `div` 2)
+centre :: Rectangle -> V2
+centre (Rectangle (V2 x1 y1) (V2 x2 y2)) = V2 ((x1+x2) `div` 2) ((y1+y2) `div` 2)
+
 main :: IO ()
 main = runEff $ runBreadcrumbs Nothing $
   evalStateShared defaultMetadata $ do
@@ -55,7 +58,7 @@ main = runEff $ runBreadcrumbs Nothing $
         , objectType = ObjectKind "player"
         , creationTime = Timestamp 0
         , modifiedTime = Timestamp 0
-        , position = Position 20 15
+        , position = V2 20 15
         , renderable = Renderable '@' (Colour 0xFFF33FFF) (Colour 0x00000000)
         , objectData = ObjectSpecifics
         })
@@ -63,7 +66,7 @@ main = runEff $ runBreadcrumbs Nothing $
         defaultWindowOptions { size = Just screenSize }
         (do
           terminalSetText "log: file='awa.log', level=trace;"
-          terminalSetText "font: 'Boxy.ttf', size=24"
+          --terminalSetText "font: 'Boxy.ttf', size=12"
         )
         (const runLoop)
         pass
@@ -97,12 +100,6 @@ type Color = Word32
 asMovement :: Keycode -> Maybe Direction
 asMovement k = k `M.lookup` movementKeys
 
-indexToCoord :: Int -> Int -> (Int, Int)
-indexToCoord w i = (i `mod` w, i `div` w)
-
-coordToIndex :: Int -> Position -> Int
-coordToIndex w p = (view #y p)*w + (view #x p)
-
 data MoveArguments = MoveArguments
   { object :: Object
   , direction :: Direction
@@ -128,7 +125,7 @@ cantMoveIntoWalls = makeRule "can't walk into walls rule" [] $ \ma -> do
     traceShow "nope can't walk through a wall" pass
     return (Just False)
 
-calculateNewLocation :: Object -> Direction -> Position
+calculateNewLocation :: Object -> Direction -> V2
 calculateNewLocation o dir = (o ^. #position) &
     (case dir of
       LeftDir -> _1 %~ subtract 1
@@ -137,17 +134,13 @@ calculateNewLocation o dir = (o ^. #position) &
       DownDir -> _2 %~ (+1)
     )
 
-getTileInfo :: TileMap -> Position -> TileInfo
-getTileInfo tm pos =
-  let ti = (view #tileMap tm) V.! coordToIndex (view (#dimensions % _1) tm) (coerce pos)
-  in fromMaybe (error "") $ ti `IM.lookup` (tm ^. #tileKinds)
 
 moveIt :: Rule Unconstrained MoveArguments Bool
 moveIt = makeRule "move rule" [] $ \ma -> do
   moveObject (getID $ object ma) (direction ma)
   return (Just True)
 
-randomMap :: IOE :> es => Int -> Int -> Eff es TileMap
+randomMap :: IOE :> es => Int -> Int -> Eff es Tiles
 randomMap w h = do
   let (wallId, floorId) = (1, 0)
   let (wMax, hMax) = (w-1, h-1)
@@ -156,25 +149,25 @@ randomMap w h = do
   let v = V.generate (w*h)
         (\i ->
           case indexToCoord w i of
-            (0, _) -> wallId
-            (_, 0) -> wallId
-            (x, y) -> if x == wMax || y == hMax || (i `IS.member` is) then wallId else floorId)
-  let t = TileMap
+            V2 0 _ -> wallId
+            V2 _ 0 -> wallId
+            V2 x y -> if x == wMax || y == hMax || (i `IS.member` is) then wallId else floorId)
+  let t = Tiles
         { tileKinds = defaultTileKinds
         , tileMap = v
-        , dimensions = (w, h)
+        , dimensions = V2 w h
         }
   return t
 
-roomMap :: IOE :> es => Int -> Int -> Eff es TileMap
+roomMap :: IOE :> es => Int -> Int -> Eff es Tiles
 roomMap w h = do
   let (wallId, floorId) = (1, 0)
   let (wMax, hMax) = (w-1, h-1)
   let v = V.generate (w*h) (const wallId)
-  let t = TileMap
+  let t = Tiles
         { tileKinds = defaultTileKinds
         , tileMap = v
-        , dimensions = (w, h)
+        , dimensions = V2 w h
         }
   let numRooms = 30
       minSize = 6
@@ -185,7 +178,7 @@ roomMap w h = do
     h' <- randomRIO (minSize, maxSize)
     x <- subtract 1 <$> randomRIO (2, fst screenSize - w' - 1)
     y <- subtract 1 <$> randomRIO (2, snd screenSize - h' - 1)
-    pure $ Rectangle (Position x y) (Position (x+w') (y+h')) ) [(0::Int)..numRooms]
+    pure $ Rectangle (V2 x y) (V2 (x+w') (y+h')) ) [(0::Int)..numRooms]
   return $ snd $ foldl'
     (\(rooms, tm) newRoom ->
       if any (rectanglesIntersect newRoom) rooms
@@ -194,8 +187,8 @@ roomMap w h = do
           let updF = case rooms of
                 [] -> id
                 (lastRoom:_) ->
-                  let newP@(Position newX newY) = centre newRoom
-                      oldP@(Position prevX prevY) = centre lastRoom
+                  let newP@(V2 newX newY) = centre newRoom
+                      oldP@(V2 prevX prevY) = centre lastRoom
                   in
                     if even (length rooms)
                     then
@@ -208,15 +201,15 @@ roomMap w h = do
 
 rectanglePoints ::
   Rectangle
-  -> [Position]
+  -> [V2]
 rectanglePoints r = do
-  x <- [(r ^. #topLeft % #x) .. (r ^. #bottomRight % #x)]
-  Position x <$> [(r ^. #topLeft % #y) .. (r ^. #bottomRight % #y)]
+  x <- [(r ^. #topLeft % _1) .. (r ^. #bottomRight % _1)]
+  V2 x <$> [(r ^. #topLeft % _2) .. (r ^. #bottomRight % _2)]
 
 digRectangle ::
   Rectangle
-  -> TileMap
-  -> TileMap
+  -> Tiles
+  -> Tiles
 digRectangle r t =
   let floorId = 0
       width = t ^. #dimensions % _1
@@ -224,24 +217,24 @@ digRectangle r t =
     t & #tileMap %~ (\x -> x V.// map (\p -> (coordToIndex width p,floorId)) (rectanglePoints r))
 
 digHorizontalTunnel ::
-  Position
+  V2
   -> Int
-  -> TileMap
-  -> TileMap
+  -> Tiles
+  -> Tiles
 digHorizontalTunnel p l t =
   let floorId = 0
       width = t ^. #dimensions % _1
-  in t & #tileMap %~ (\x -> x V.// map (\i -> (coordToIndex width (p & #x %~ (+ if l > 0 then i else -i)),floorId)) [0..(abs l)] )
+  in t & #tileMap %~ (\x -> x V.// map (\i -> (coordToIndex width (p & _1 %~ (+ if l > 0 then i else -i)),floorId)) [0..(abs l)] )
 
 digVerticalTunnel ::
-  Position
+  V2
   -> Int
-  -> TileMap
-  -> TileMap
+  -> Tiles
+  -> Tiles
 digVerticalTunnel p l t =
   let floorId = 0
       width = t ^. #dimensions % _1
-  in t & #tileMap %~ (\x -> x V.// map (\i -> (coordToIndex width (p & #y %~ (+ if l > 0 then i else -i)),floorId)) [0..(abs l)] )
+  in t & #tileMap %~ (\x -> x V.// map (\i -> (coordToIndex width (p & _2 %~ (+ if l > 0 then i else -i)),floorId)) [0..(abs l)] )
 
 moveObject ::
   State World :> es
@@ -290,7 +283,7 @@ renderMap = do
   V.iforM_ (es ^. #tileMap) $ \i v -> do
     let t = fromMaybe (error "") $ v `IM.lookup` (es ^. #tileKinds)
     let r = t ^. #renderable
-    let (x, y) = indexToCoord (es ^. #dimensions % _1) i
+    let V2 x y = indexToCoord (es ^. #dimensions % _1) i
     terminalColorUInt $ CUInt . toWord32 $ (r ^. #foreground)
     terminalBkColorUInt $ CUInt . toWord32 $ (r ^. #background)
     terminalPrintText x y (one $ r ^. #glyph)
@@ -304,4 +297,4 @@ renderObjects = do
     let r = v ^. #renderable
     terminalColorUInt $ CUInt . toWord32 $ (r ^. #foreground)
     terminalBkColorUInt $ CUInt . toWord32 $ (r ^. #background)
-    terminalPrintText (v ^. #position % #x) (v ^. #position % #y) (one $ r ^. #glyph)
+    terminalPrintText (v ^. #position % _1) (v ^. #position % _2) (one $ r ^. #glyph)

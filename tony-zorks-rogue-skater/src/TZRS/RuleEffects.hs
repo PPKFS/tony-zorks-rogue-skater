@@ -8,33 +8,16 @@ import Effectful.Writer.Static.Local
 import TZRS.Store
 import TZRS.Object
 import qualified Data.Vector.Unboxed as V
+import TZRS.World
 data Action a b c
 data ActionCollection
 
-data World = World
-  { objects :: Store Object
-  , tileMap :: TileMap
-  } deriving stock (Generic)
-
-data TileInfo = TileInfo
-  { name :: Text
-  , renderable :: Renderable
-  , walkable :: Bool
-  } deriving stock (Generic, Show)
-
-data TileMap = TileMap
-  { tileKinds :: IntMap TileInfo
-  , tileMap :: V.Vector Int
-  , dimensions :: (Int, Int)
-  } deriving stock (Generic, Show)
 
 data Metadata = Metadata
   { pendingQuit :: Bool
   } deriving stock (Generic, Show)
 
-makeFieldLabelsNoPrefix ''World
 makeFieldLabelsNoPrefix ''Metadata
-
 
 data ActionHandler :: Effect where
   ParseAction :: Lens' ActionCollection (Action args vars ret) -> args -> ActionHandler m (Either Text Bool)

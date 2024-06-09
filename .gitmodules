@@ -1,0 +1,6 @@
+[submodule "bearlibterminal/bearlibterminal"]
+	path = bearlibterminal/bearlibterminal
+	url = https://github.com/cfyzium/bearlibterminal.git
+[submodule "bearlibterminal-hs"]
+	path = bearlibterminal-hs
+	url = ./bearlibterminal-hs
