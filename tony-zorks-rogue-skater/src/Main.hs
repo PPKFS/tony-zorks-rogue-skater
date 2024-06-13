@@ -21,7 +21,10 @@ import Rogue.Events
 import Rogue.Colour
 import Rogue.Geometry.Rectangle
 import Rogue.Array2D.Boxed
+import Rogue.FieldOfView.Visibility
 import Effectful.State.Dynamic
+import Rogue.Geometry.Line
+import Rogue.FieldOfView.Raycasting
 
 screenSize :: V2
 screenSize = V2 100 60
@@ -29,7 +32,7 @@ screenSize = V2 100 60
 main :: IO ()
 main = runEff $ runBreadcrumbs Nothing $
   evalStateShared defaultMetadata $ do
-    w <- withV2 screenSize roomMap
+    w <- withV2 screenSize (\x y -> roomMap x y)
     evalStateShared (World emptyStore w) $
       runTileMapAsState $ do
         ((%=) @_ @World) (#objects % coerced) $ EM.insert playerId (Object
@@ -41,7 +44,7 @@ main = runEff $ runBreadcrumbs Nothing $
           , modifiedTime = Timestamp 0
           , position = V2 20 15
           , renderable = Renderable '@' (fromRGB 0x75 0xa2 0xeb ) (Colour 0x00000000)
-          , objectData = ObjectSpecifics
+          , objectData = PlayerSpecifics $ Player { viewshed = Viewshed V.empty 5}
           })
         withWindow
           defaultWindowOptions { size = Just screenSize }
@@ -152,6 +155,28 @@ roomMap w h = do
           updF = maybe id digStuff $ listToMaybe rooms
       in (newRoom:rooms, updF $ digRectangle newRoom tm)) ([], t) allPossibleRooms
 
+roomMap2 :: Int -> Int -> Tiles
+roomMap2 w h = do
+  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h) }
+    in foldl' (\tm v -> digRectangle (Rectangle v v) tm) t (mconcat $ circleRays (V2 30 30) 15)
+  {-let numRooms = 30; minSize = 6; maxSize = 10
+  allPossibleRooms <- mapM (const $ do
+    dims <- let d = (minSize, maxSize) in V2 <$> randomRIO d <*> randomRIO d
+    pos <- let g l = subtract 1 <$> randomRIO (2, (screenSize ^. l) - (dims ^. l) - 1) in V2 <$> g _1 <*> g _2
+    pure $ Rectangle pos (dims + pos)) [(0::Int)..numRooms]
+  return $ snd $ foldl' (\(rooms, tm) newRoom ->
+    if any (rectanglesIntersect newRoom) rooms then {- ignore -} (rooms, tm)
+    else
+      let digStuff lastRoom =
+            let newP@(V2 newX newY) = centre newRoom
+                oldP@(V2 prevX prevY) = centre lastRoom
+            in
+              if even (length rooms)
+              then digVerticalTunnel oldP (newY - prevY) . digHorizontalTunnel newP (prevX - newX)
+              else digHorizontalTunnel oldP (newX - prevX) . digVerticalTunnel newP (prevY - newY)
+          updF = maybe id digStuff $ listToMaybe rooms
+      in (newRoom:rooms, updF $ digRectangle newRoom tm)) ([], t) allPossibleRooms
+  -}
 digRectangle ::
   Rectangle
   -> Tiles
@@ -212,7 +237,8 @@ runLoop = do
   ifM (use @Metadata #pendingQuit) pass runLoop
 
 renderMap ::
-  State World :> es
+  TileMap :> es
+  => State World :> es
   => IOE :> es
   => Eff es ()
 renderMap = do
@@ -222,6 +248,15 @@ renderMap = do
     terminalColour (r ^. #foreground)
     terminalBkColour (r ^. #background)
     terminalPrintText x y (one $ r ^. #glyph)
+  pl <- use @World (#objects % at playerId)
+  let fov = calculateFov es (view #position $ fromMaybe (error "no player") pl) 15
+  forM_ fov $ \a -> do
+    t <- getTile a
+    let r = t ^. #renderable
+    terminalColour (Colour 0xFF55FF44)
+    terminalBkColour (r ^. #background)
+    withV2 a terminalPrintText (one $ '!')
+
 
 renderObjects ::
   State World :> es

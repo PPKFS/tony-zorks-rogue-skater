@@ -9,6 +9,7 @@ import Rogue.Geometry.V2
 import qualified Rogue.Tilemap as TM
 import Rogue.Array2D.Boxed
 import Effectful.State.Dynamic (State)
+import Rogue.FieldOfView.Visibility
 
 data World = World
   { objects :: Store Object
@@ -29,6 +30,10 @@ instance TM.Tilemap Tiles TileInfo where
   getTile = TM.getTile . coerce @_ @(Array2D TileInfo)
   setTile (Tiles a) t = Tiles . TM.setTile a t
   setTiles (Tiles a) = Tiles . TM.setTiles a
+
+instance VisibilityMap Tiles where
+  positionBlocksVisibility t p = not $ view #walkable $ TM.getTile t p
+  dimensions (Tiles (Array2D (_, d))) = d
 
 makeFieldLabelsNoPrefix ''World
 

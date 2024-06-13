@@ -11,3 +11,6 @@ cradle:
 
     - path: "bearlibterminal-hs"
       component: "lib:bearlibterminal-hs"
+
+    - path: "roguefunctor"
+      component: "lib:roguefunctor"

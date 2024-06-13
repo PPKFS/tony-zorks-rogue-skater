@@ -3,7 +3,7 @@
 	url = https://github.com/cfyzium/bearlibterminal.git
 [submodule "bearlibterminal-hs"]
 	path = bearlibterminal-hs
-	url = ./bearlibterminal-hs
+	url = https://github.com/PPKFS/bearlibterminal-hs.git
 [submodule "roguefunctor"]
 	path = roguefunctor
-	url = ./roguefunctor
+	url = https://github.com/PPKFS/roguefunctor.git

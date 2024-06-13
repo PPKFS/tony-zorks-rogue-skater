@@ -6,7 +6,7 @@ import TZRS.Prelude
 import TZRS.Entity
 import Rogue.Geometry.V2
 import Rogue.Colour
-import Rogue.FieldOfView.Viewshed
+import Rogue.FieldOfView.Visibility
 
 -- | Pointed set class; Monoid without the operation, or the dreaded default typeclass.
 class Pointed s where
