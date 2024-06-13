@@ -8,7 +8,6 @@ module TZRS.Entity
 
 import TZRS.Prelude
 
-
 -- | An object ID.
 newtype Entity = Entity
   { unID :: Int

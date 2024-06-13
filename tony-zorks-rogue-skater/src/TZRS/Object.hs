@@ -4,7 +4,9 @@ module TZRS.Object where
 import TZRS.Prelude
 
 import TZRS.Entity
-import TZRS.Geometry
+import Rogue.Geometry.V2
+import Rogue.Colour
+import Rogue.FieldOfView.Viewshed
 
 -- | Pointed set class; Monoid without the operation, or the dreaded default typeclass.
 class Pointed s where
@@ -27,10 +29,12 @@ newtype Timestamp = Timestamp
 
 type ObjectText = Text
 
-data ObjectSpecifics = ObjectSpecifics
+data ObjectSpecifics =
+  PlayerSpecifics PlayerSpecifics
 
-newtype Colour = Colour { toWord32 :: Word32 }
-  deriving stock (Show, Read, Generic)
+data PlayerSpecifics = Player
+  { viewshed :: Viewshed
+  }
 
 data Renderable = Renderable
   { glyph :: Char

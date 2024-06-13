@@ -1,10 +1,10 @@
 cabal-version: 3.6
-name:          yaifl
+name:          tony-zorks-rogue-skater
 version:       0.0.10.540
 synopsis:      Yet another interactive fiction library.
 description:   Yet another interactive fiction library.
-homepage:      https://github.com/PPKFS/yaifl
-bug-reports:   https://github.com/PPKFS/yaifl/issues
+homepage:      https://github.com/PPKFS/tony-zorks-rogue-skater
+bug-reports:   https://github.com/PPKFS/tony-zorks-rogue-skater/issues
 license:       MIT
 author:        Avery
 maintainer:    Avery <thecommunistduck@hotmail.co.uk>
@@ -12,10 +12,9 @@ copyright:     2022-2023 Avery
 category:      Game Development
 build-type:    Simple
 tested-with:   GHC == 9.4.7
-
 source-repository head
   type:     git
-  location: https://github.com/PPKFS/yaifl.git
+  location: https://github.com/PPKFS/tony-zorks-rogue-skater.git
 
 common common-options
   build-depends:
@@ -30,13 +29,12 @@ common common-options
     text-display >= 0.0.5 && < 1.0,
     breadcrumbs >= 1.0.0.0 && <= 10.0.0.0,
     solitude >= 0.0.0.0 && <= 10.0.0.0,
-    bearlibterminal-hs,
+    bearlibterminal,
     enummapset,
     mono-traversable,
     vector,
-    random
-  extra-lib-dirs:
-    /Users/avery/tony-zorks-rogue-skater/bearlibterminal-hs/cbits
+    random,
+    roguefunctor
 
   ghc-options:
     -Wall -Wcompat -Widentities -Wredundant-constraints
@@ -74,7 +72,6 @@ executable tony-zorks-rogue-skater
   other-modules:
     TZRS.Prelude
     TZRS.Entity
-    TZRS.Geometry
     TZRS.World
     TZRS.RuleEffects
     TZRS.Rulebook

@@ -5,9 +5,6 @@ import Solitude
 import Breadcrumbs ( Breadcrumbs )
 import Effectful.TH ( makeEffect )
 import Effectful.Writer.Static.Local
-import TZRS.Store
-import TZRS.Object
-import qualified Data.Vector.Unboxed as V
 import TZRS.World
 data Action a b c
 data ActionCollection
@@ -28,6 +25,7 @@ type RuleEffects es = (
   State Metadata :> es
   , State World :> es
   , Breadcrumbs :> es
+  , TileMap :> es
   )
 
 class SayableValue s where

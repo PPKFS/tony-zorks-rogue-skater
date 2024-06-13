@@ -4,3 +4,6 @@
 [submodule "bearlibterminal-hs"]
 	path = bearlibterminal-hs
 	url = ./bearlibterminal-hs
+[submodule "roguefunctor"]
+	path = roguefunctor
+	url = ./roguefunctor
