@@ -7,6 +7,9 @@ import TZRS.Entity
 import Rogue.Geometry.V2
 import Rogue.Colour
 import Rogue.FieldOfView.Visibility
+import Rogue.Property.Has
+import Rogue.Property.TH
+import Rogue.ObjectQuery
 
 -- | Pointed set class; Monoid without the operation, or the dreaded default typeclass.
 class Pointed s where
@@ -31,10 +34,17 @@ type ObjectText = Text
 
 data ObjectSpecifics =
   PlayerSpecifics PlayerSpecifics
+  | Junk
+  deriving stock (Generic)
 
 data PlayerSpecifics = Player
   { viewshed :: Viewshed
-  }
+  } deriving stock (Generic)
+
+makePrisms ''ObjectSpecifics
+
+instance MayHaveProperty ObjectSpecifics Viewshed where
+  propertyAT = _PlayerSpecifics % #viewshed
 
 data Renderable = Renderable
   { glyph :: Char
@@ -56,13 +66,23 @@ data Object = Object
 
 makeFieldLabelsNoPrefix ''Object
 
+instance HasID Object where
+  type Id Object = Entity
+  getID = objectId
+
 instance Display Object where
   displayBuilder = const "object"
+
+instance HasSpecifics Object where
+  type Specifics Object = ObjectSpecifics
+  specificsL = #objectData
 
 -- | By generalising `Eq`, we can compare two objects of different kinds. Trivially this is always `False`,
 -- but it does allow comparing a `Thing` and an `AnyObject`.
 objectEquals ::
-  HasID a
+  (Id a ~ Id b)
+  => (Eq (Id a))
+  => HasID a
   => HasID b
   => a
   -> b
@@ -75,6 +95,3 @@ instance Eq Object where
 -- | Maybe I'll need this instance for something or other?
 instance Ord Object where
   compare = (. creationTime) . compare . creationTime
-
-instance HasID Object where
-  getID = objectId

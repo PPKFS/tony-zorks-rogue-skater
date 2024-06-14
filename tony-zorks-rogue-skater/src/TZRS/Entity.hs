@@ -7,6 +7,7 @@ module TZRS.Entity
   ) where
 
 import TZRS.Prelude
+import Rogue.ObjectQuery
 
 -- | An object ID.
 newtype Entity = Entity
@@ -14,13 +15,9 @@ newtype Entity = Entity
   } deriving stock (Show, Generic)
     deriving newtype (Eq, Num, Read, Bounded, Hashable, Enum, Ord, Real, Integral)
 
--- | Typeclass and function for extracting an entity from something (to store references)
-class HasID n where
-  -- | Get an ID.
-  getID :: n -> Entity
-
 -- | Trivial instance.
 instance HasID Entity where
+  type Id Entity = Entity
   getID = id
 
 -- | For pretty printing in logs.
@@ -41,4 +38,5 @@ unsafeTagEntity ::
 unsafeTagEntity = TaggedEntity
 
 instance HasID (TaggedEntity t) where
+  type Id (TaggedEntity t) = Entity
   getID = unTag

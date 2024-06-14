@@ -6,6 +6,8 @@ import Breadcrumbs ( Breadcrumbs )
 import Effectful.TH ( makeEffect )
 import Effectful.Writer.Static.Local
 import TZRS.World
+import TZRS.Object
+import Rogue.ObjectQuery
 data Action a b c
 data ActionCollection
 
@@ -23,6 +25,7 @@ makeEffect ''ActionHandler
 
 type RuleEffects es = (
   State Metadata :> es
+  , ObjectQuery Object :> es
   , State World :> es
   , Breadcrumbs :> es
   , TileMap :> es

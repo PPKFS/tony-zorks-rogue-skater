@@ -6,9 +6,6 @@ import qualified Data.Map.Strict as M
 import TZRS.Store
 import TZRS.Entity
 import qualified Data.EnumMap as EM
-import qualified Data.Vector as V
-import qualified Data.IntSet as IS
-import System.Random
 import TZRS.Rulebook
 import TZRS.RuleEffects
 import TZRS.Run
@@ -19,12 +16,13 @@ import Rogue.Config
 import Rogue.Window
 import Rogue.Events
 import Rogue.Colour
-import Rogue.Geometry.Rectangle
-import Rogue.Array2D.Boxed
 import Rogue.FieldOfView.Visibility
 import Effectful.State.Dynamic
-import Rogue.Geometry.Line
 import Rogue.FieldOfView.Raycasting
+import Rogue.ObjectQuery
+import qualified Data.Set as S
+import Effectful.Dispatch.Dynamic
+import Rogue.Array2D.Boxed
 
 screenSize :: V2
 screenSize = V2 100 60
@@ -32,25 +30,29 @@ screenSize = V2 100 60
 main :: IO ()
 main = runEff $ runBreadcrumbs Nothing $
   evalStateShared defaultMetadata $ do
-    w <- withV2 screenSize (\x y -> roomMap x y)
-    evalStateShared (World emptyStore w) $
+    w <- withV2 screenSize (roomMap screenSize)
+    evalStateShared (World emptyStore w [] (Timestamp 0) (Entity 0)) $
+      runQueryAsState $
       runTileMapAsState $ do
-        ((%=) @_ @World) (#objects % coerced) $ EM.insert playerId (Object
-          { name = "player"
-          , description = ""
-          , objectId = playerId
-          , objectType = ObjectKind "player"
-          , creationTime = Timestamp 0
-          , modifiedTime = Timestamp 0
-          , position = V2 20 15
-          , renderable = Renderable '@' (fromRGB 0x75 0xa2 0xeb ) (Colour 0x00000000)
-          , objectData = PlayerSpecifics $ Player { viewshed = Viewshed V.empty 5}
-          })
+        pId <- generateEntity
+        let player =
+              (Object
+                { name = "player"
+                , description = ""
+                , objectId = pId
+                , objectType = ObjectKind "player"
+                , creationTime = Timestamp 0
+                , modifiedTime = Timestamp 0
+                , position = V2 20 15
+                , renderable = Renderable '@' (fromRGB 0x75 0xa2 0xeb ) (Colour 0x00000000)
+                , objectData = PlayerSpecifics $ Player { viewshed = Viewshed S.empty 20}
+                })
+        setObject player
         withWindow
           defaultWindowOptions { size = Just screenSize }
           (do
             terminalSetText "log: file='awa.log', level=trace;"
-            --terminalSetText "font: 'Boxy.ttf', size=12"
+            terminalSetText "font: 'Boxy.ttf', size=24"
           )
           (const runLoop)
           pass
@@ -62,12 +64,6 @@ data Direction = LeftDir | RightDir | UpDir | DownDir
 
 playerId :: Entity
 playerId = Entity 0
-
-floorTile :: TileInfo
-floorTile = TileInfo "floor" (Renderable '.' (Colour 0xFF313036) (Colour 0x00000000)) True
-
-wall :: TileInfo
-wall = TileInfo "wall" (Renderable '#' (Colour 0xFFb9caee) (Colour 0x00000000)) False
 
 movementKeys :: M.Map Keycode Direction
 movementKeys = M.fromList
@@ -100,9 +96,10 @@ cantMoveIntoWalls :: Rule Unconstrained MoveArguments Bool
 cantMoveIntoWalls = makeRule "can't walk into walls rule" [] $ \ma -> do
   let newLoc = calculateNewLocation (object ma) (direction ma)
   ti <- getTile newLoc
-  if walkable ti then rulePass else do
+ {-} if walkable ti then rulePass else do
     traceShow "nope can't walk through a wall" pass
-    return (Just False)
+    return (Just False)-}
+  rulePass
 
 calculateNewLocation :: Object -> Direction -> V2
 calculateNewLocation o dir = (o ^. #position) &
@@ -118,109 +115,58 @@ moveIt = makeRule "move rule" [] $ \ma -> do
   moveObject (getID $ object ma) (direction ma)
   return (Just True)
 
-randomMap :: IOE :> es => Int -> Int -> Eff es Tiles
-randomMap w h = do
-  let (wMax, hMax) = (w-1, h-1)
-  randomWalls <- mapM (const $ randomRIO (0, (w*h)-1)) [(0::Int)..500]
-  let is = IS.fromList randomWalls
-  let v = V.generate (w*h)
-        (\i ->
-          case indexToCoord w i of
-            V2 0 _ -> wall
-            V2 _ 0 -> wall
-            V2 x y -> if x == wMax || y == hMax || (i `IS.member` is) then wall else floorTile)
-  let t = Tiles
-        { tileMap = Array2D (v, V2 w h)
-        }
-  return t
 
-roomMap :: IOE :> es => Int -> Int -> Eff es Tiles
-roomMap w h = do
-  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h) }
-  let numRooms = 30; minSize = 6; maxSize = 10
-  allPossibleRooms <- mapM (const $ do
-    dims <- let d = (minSize, maxSize) in V2 <$> randomRIO d <*> randomRIO d
-    pos <- let g l = subtract 1 <$> randomRIO (2, (screenSize ^. l) - (dims ^. l) - 1) in V2 <$> g _1 <*> g _2
-    pure $ Rectangle pos (dims + pos)) [(0::Int)..numRooms]
-  return $ snd $ foldl' (\(rooms, tm) newRoom ->
-    if any (rectanglesIntersect newRoom) rooms then {- ignore -} (rooms, tm)
-    else
-      let digStuff lastRoom =
-            let newP@(V2 newX newY) = centre newRoom
-                oldP@(V2 prevX prevY) = centre lastRoom
-            in
-              if even (length rooms)
-              then digVerticalTunnel oldP (newY - prevY) . digHorizontalTunnel newP (prevX - newX)
-              else digHorizontalTunnel oldP (newX - prevX) . digVerticalTunnel newP (prevY - newY)
-          updF = maybe id digStuff $ listToMaybe rooms
-      in (newRoom:rooms, updF $ digRectangle newRoom tm)) ([], t) allPossibleRooms
+runQueryAsState ::
+  State World :> es
+  => Eff (ObjectQuery Object : es) a
+  -> Eff es a
+runQueryAsState = interpret $ \env -> \case
+  GenerateEntity -> #entityCounter <<%= (+1)
+  SetObject r -> #objects % at (getID r) %= updateIt r
+  GetObject e -> do
+    let i = getID e
+    mbObj <- use $ #objects % at i
+    case mbObj of
+      Nothing -> error $ "Could not find object with id " <> show i
+      Just x -> return x
+  TraverseObjects f -> do
+    m <- use #objects
+    mapM_ (\aT -> do
+      r <- (\r -> localSeqUnlift env $ \unlift -> unlift $ f r) aT
+      whenJust r (\r' -> localSeqUnlift env $ \unlift -> unlift $ setObject r')) m
 
-roomMap2 :: Int -> Int -> Tiles
-roomMap2 w h = do
-  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h) }
-    in foldl' (\tm v -> digRectangle (Rectangle v v) tm) t (mconcat $ circleRays (V2 30 30) 15)
-  {-let numRooms = 30; minSize = 6; maxSize = 10
-  allPossibleRooms <- mapM (const $ do
-    dims <- let d = (minSize, maxSize) in V2 <$> randomRIO d <*> randomRIO d
-    pos <- let g l = subtract 1 <$> randomRIO (2, (screenSize ^. l) - (dims ^. l) - 1) in V2 <$> g _1 <*> g _2
-    pure $ Rectangle pos (dims + pos)) [(0::Int)..numRooms]
-  return $ snd $ foldl' (\(rooms, tm) newRoom ->
-    if any (rectanglesIntersect newRoom) rooms then {- ignore -} (rooms, tm)
-    else
-      let digStuff lastRoom =
-            let newP@(V2 newX newY) = centre newRoom
-                oldP@(V2 prevX prevY) = centre lastRoom
-            in
-              if even (length rooms)
-              then digVerticalTunnel oldP (newY - prevY) . digHorizontalTunnel newP (prevX - newX)
-              else digHorizontalTunnel oldP (newX - prevX) . digVerticalTunnel newP (prevY - newY)
-          updF = maybe id digStuff $ listToMaybe rooms
-      in (newRoom:rooms, updF $ digRectangle newRoom tm)) ([], t) allPossibleRooms
-  -}
-digRectangle ::
-  Rectangle
-  -> Tiles
-  -> Tiles
-digRectangle r = #tileMap %~ (\x -> x //@ map (,floorTile) (rectanglePoints Horizontal r))
-
-digHorizontalTunnel ::
-  V2
-  -> Int
-  -> Tiles
-  -> Tiles
-digHorizontalTunnel p l = #tileMap %~ (\x -> x //@ map (\i -> (p & _1 %~ (+ if l > 0 then i else -i),floorTile)) [0..(abs l)] )
-
-digVerticalTunnel ::
-  V2
-  -> Int
-  -> Tiles
-  -> Tiles
-digVerticalTunnel p l = #tileMap %~ (\x -> x //@ map (\i -> (p & _2 %~ (+ if l > 0 then i else -i), floorTile)) [0..(abs l)] )
+updateIt :: a -> Maybe a -> Maybe a
+updateIt newObj mbExisting = case mbExisting of
+  Nothing -> Just newObj
+  Just _ -> Just newObj
 
 moveObject ::
-  State World :> es
+  ObjectQuery Object :> es
+  => State World :> es
   => Entity
   -> Direction
   -> Eff es ()
 moveObject e dir = do
-  #objects % at e % _Just % #position %=
+  modifyObject e (#position %~
     (case dir of
       LeftDir -> _1 %~ subtract 1
       RightDir -> _1 %~ (+1)
       UpDir -> _2 %~ subtract 1
       DownDir -> _2 %~ (+1)
-    )
+    ))
+  #dirtyViewsheds %= (e:)
 
 runLoop ::
   State World :> es
+  => ObjectQuery Object :> es
   => State Metadata :> es
   => Breadcrumbs :> es
   => TileMap :> es
   => IOE :> es
   => Eff es ()
 runLoop = do
+  everyTurn
   terminalClear
-  --pl <- use #playerLocation
   renderMap
   renderObjects
   terminalRefresh
@@ -238,25 +184,26 @@ runLoop = do
 
 renderMap ::
   TileMap :> es
+  => ObjectQuery Object :> es
   => State World :> es
   => IOE :> es
   => Eff es ()
 renderMap = do
   es <- use #tileMap
-  traverseArrayWithCoord_ (es ^. #tileMap % coerced @_ @(Array2D TileInfo)) $ \(V2 x y) t -> do
+  traverseArrayWithCoord_ (es ^. #revealedTiles) $ \p rev -> when rev $ do
+    t <- getTile p
+    let r = t ^. #renderable
+    terminalColour (desaturate $ toGreyscale $ r ^. #foreground)
+    terminalBkColour (desaturate $ toGreyscale $ r ^. #background)
+    void $ withV2 p terminalPrintText (one $ r ^. #glyph)
+  pl <- getObject playerId
+  let vs = fromMaybe (error "") $ getViewshedMaybe pl
+  forM_ (vs ^. #visibleTiles) $ \a -> do
+    t <- getTile a
     let r = t ^. #renderable
     terminalColour (r ^. #foreground)
     terminalBkColour (r ^. #background)
-    terminalPrintText x y (one $ r ^. #glyph)
-  pl <- use @World (#objects % at playerId)
-  let fov = calculateFov es (view #position $ fromMaybe (error "no player") pl) 15
-  forM_ fov $ \a -> do
-    t <- getTile a
-    let r = t ^. #renderable
-    terminalColour (Colour 0xFF55FF44)
-    terminalBkColour (r ^. #background)
-    withV2 a terminalPrintText (one $ '!')
-
+    withV2 a terminalPrintText (one $ r ^. #glyph)
 
 renderObjects ::
   State World :> es
@@ -269,3 +216,31 @@ renderObjects = do
     terminalColour (r ^. #foreground)
     terminalBkColour (r ^. #background)
     terminalPrintText (v ^. #position % _1) (v ^. #position % _2) (one $ r ^. #glyph)
+
+everyTurn ::
+  ObjectQuery Object :> es
+  => State World :> es
+  => Eff es ()
+everyTurn = do
+  tickTurn
+  updateViewsheds
+  -- update all (dirty) viewsheds
+  -- each AI entity should then see if it wants to act
+
+updateViewsheds :: ObjectQuery Object :> es => State World :> es => Eff es ()
+updateViewsheds = do
+  vs <- use #dirtyViewsheds
+  #dirtyViewsheds .= []
+  forM_ vs updateViewshed
+
+updateViewshed :: ObjectQuery Object :> es => State World :> es => Entity -> Eff es ()
+updateViewshed e = do
+  o <- getObject e
+  tm <- use #tileMap
+  let v = getViewshedMaybe o
+  whenJust v $ \v' -> do
+    let fov = calculateFov tm (view #position o) (range v')
+    modifyViewshed o (#visibleTiles .~ fov)
+    #tileMap % #revealedTiles %= (\rt -> rt //@ map (,True) (S.toList fov))
+  --update it...
+  pass
