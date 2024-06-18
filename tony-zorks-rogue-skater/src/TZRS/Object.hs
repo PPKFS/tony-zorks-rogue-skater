@@ -4,11 +4,9 @@ module TZRS.Object where
 import TZRS.Prelude
 
 import TZRS.Entity
-import Rogue.Geometry.V2
 import Rogue.Colour
 import Rogue.FieldOfView.Visibility
 import Rogue.Property.Has
-import Rogue.Property.TH
 import Rogue.ObjectQuery
 
 -- | Pointed set class; Monoid without the operation, or the dreaded default typeclass.
@@ -34,17 +32,21 @@ type ObjectText = Text
 
 data ObjectSpecifics =
   PlayerSpecifics PlayerSpecifics
-  | Junk
+  | MonsterSpecifics MonsterSpecifics
   deriving stock (Generic)
 
 data PlayerSpecifics = Player
   { viewshed :: Viewshed
   } deriving stock (Generic)
 
+data MonsterSpecifics = Monster
+  { viewshed :: Viewshed
+  } deriving stock (Generic)
+
 makePrisms ''ObjectSpecifics
 
 instance MayHaveProperty ObjectSpecifics Viewshed where
-  propertyAT = _PlayerSpecifics % #viewshed
+  propertyAT = (_MonsterSpecifics % #viewshed) `thenATraverse` (_PlayerSpecifics % #viewshed)
 
 data Renderable = Renderable
   { glyph :: Char

@@ -5,7 +5,6 @@ import TZRS.Object
 import TZRS.Prelude
 import Effectful.Dispatch.Dynamic
 import Effectful.TH
-import Rogue.Geometry.V2
 import qualified Rogue.Tilemap as TM
 import Rogue.Array2D.Boxed
 import Effectful.State.Dynamic (State)
@@ -17,6 +16,7 @@ import System.Random
 import qualified Data.IntSet as IS
 import Rogue.Geometry.Line
 import TZRS.Entity
+import Rogue.Rendering.Viewport
 
 data World = World
   { objects :: Store Object
@@ -24,7 +24,17 @@ data World = World
   , dirtyViewsheds :: [Entity]
   , turn :: Timestamp
   , entityCounter :: Entity
+  , viewports :: Viewports
   } deriving stock (Generic)
+
+data Viewports = Viewports
+  { mapViewport :: Viewport ()
+  , bottomViewport :: Viewport ()
+  , sideViewport :: Viewport ()
+  } deriving stock (Generic)
+
+instance AsLayer () where
+  toLayer () = 0
 
 data TileInfo = TileInfo
   { name :: Text
@@ -35,6 +45,7 @@ data TileInfo = TileInfo
 data Tiles = Tiles
   { tileMap :: Array2D TileInfo
   , revealedTiles :: Array2D Bool
+  , rooms :: [Rectangle]
   } deriving stock (Generic, Show)
 
 makeFieldLabelsNoPrefix ''Tiles
@@ -46,7 +57,7 @@ instance TM.Tilemap Tiles TileInfo where
 
 instance VisibilityMap Tiles where
   positionBlocksVisibility t p = not $ view #walkable $ TM.getTile t p
-  dimensions (Tiles (Array2D (_, d)) _) = d
+  dimensions (Tiles (Array2D (_, d)) _ _) = d
 
 makeFieldLabelsNoPrefix ''World
 
@@ -107,30 +118,31 @@ randomWalls (V2 w h) numWalls = do
             V2 0 _ -> wall
             V2 _ 0 -> wall
             V2 x y -> if x == wMax || y == hMax || (i `IS.member` is) then wall else floorTile)
-  return Tiles { tileMap = Array2D (v, V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h) }
+  return Tiles { tileMap = Array2D (v, V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h), rooms = [] }
 
 roomMap :: IOE :> es => V2 -> Int -> Int -> Eff es Tiles
 roomMap screenSize w h = do
-  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h) }
+  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h), rooms = [] }
   let numRooms = 30; minSize = 6; maxSize = 10
   allPossibleRooms <- mapM (const $ do
     dims <- let d = (minSize, maxSize) in V2 <$> randomRIO d <*> randomRIO d
     pos <- let g l = subtract 1 <$> randomRIO (2, (screenSize ^. l) - (dims ^. l) - 1) in V2 <$> g _1 <*> g _2
     pure $ Rectangle pos (dims + pos)) [(0::Int)..numRooms]
-  return $ snd $ foldl' (\(rooms, tm) newRoom ->
-    if any (rectanglesIntersect newRoom) rooms then {- ignore -} (rooms, tm)
-    else
-      let digStuff lastRoom =
-            let newP@(V2 newX newY) = centre newRoom
-                oldP@(V2 prevX prevY) = centre lastRoom
-            in
-              if even (length rooms)
-              then digVerticalTunnel oldP (newY - prevY) . digHorizontalTunnel newP (prevX - newX)
-              else digHorizontalTunnel oldP (newX - prevX) . digVerticalTunnel newP (prevY - newY)
-          updF = maybe id digStuff $ listToMaybe rooms
-      in (newRoom:rooms, updF $ digRectangle newRoom tm)) ([], t) allPossibleRooms
+  let (rs, tiles) = foldl' (\(rooms, tm) newRoom ->
+        if any (rectanglesIntersect newRoom) rooms then {- ignore -} (rooms, tm)
+        else
+          let digStuff lastRoom =
+                let newP@(V2 newX newY) = centre newRoom
+                    oldP@(V2 prevX prevY) = centre lastRoom
+                in
+                  if even (length rooms)
+                  then digVerticalTunnel oldP (newY - prevY) . digHorizontalTunnel newP (prevX - newX)
+                  else digHorizontalTunnel oldP (newX - prevX) . digVerticalTunnel newP (prevY - newY)
+              updF = maybe id digStuff $ listToMaybe rooms
+          in (newRoom:rooms, updF $ digRectangle newRoom tm)) ([], t) allPossibleRooms
+  return (tiles & #rooms .~ rs)
 
 roomMap2 :: Int -> Int -> Tiles
 roomMap2 w h = do
-  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h) }
+  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h), rooms = [] }
     in foldl' (\tm v -> digRectangle (Rectangle v v) tm) t (mconcat $ circleRays (V2 30 30) 15)

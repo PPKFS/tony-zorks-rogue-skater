@@ -1,61 +1,140 @@
 module Main where
 
-import TZRS.Prelude
-import TZRS.Object
-import qualified Data.Map.Strict as M
-import TZRS.Store
-import TZRS.Entity
-import qualified Data.EnumMap as EM
-import TZRS.Rulebook
-import TZRS.RuleEffects
-import TZRS.Run
 import Breadcrumbs
-import TZRS.World
-import Rogue.Geometry.V2
-import Rogue.Config
-import Rogue.Window
-import Rogue.Events
-import Rogue.Colour
-import Rogue.FieldOfView.Visibility
-import Effectful.State.Dynamic
-import Rogue.FieldOfView.Raycasting
-import Rogue.ObjectQuery
-import qualified Data.Set as S
 import Effectful.Dispatch.Dynamic
+import Effectful.State.Dynamic
+
 import Rogue.Array2D.Boxed
+import Rogue.Colour
+import Rogue.Config
+import Rogue.Events
+import Rogue.FieldOfView.Raycasting
+import Rogue.FieldOfView.Visibility
+import Rogue.Geometry.Rectangle
+import Rogue.ObjectQuery
+import Rogue.Rendering.Viewport
+import Rogue.Window
+
+import TZRS.Entity
+import TZRS.Object
+import TZRS.Prelude
+import TZRS.RuleEffects
+import TZRS.Rulebook
+import TZRS.Run
+import TZRS.Store
+import TZRS.World
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
+import System.Random (randomRIO, randomIO)
+import System.Random.Stateful (UniformRange(uniformRM))
 
 screenSize :: V2
-screenSize = V2 100 60
+screenSize = V2 130 80
+
+mapViewportRectangle :: Rectangle
+mapViewportRectangle = Rectangle (V2 0 0) (screenSize-V2 20 15)
+
+bottomViewportRectangle :: Rectangle
+bottomViewportRectangle = rectangleFromDimensions
+  (V2 0 (bottomEdge mapViewportRectangle + 1))
+  (V2 (view _1 screenSize - 20) 14)
+
+sideViewportRectangle :: Rectangle
+sideViewportRectangle = rectangleFromDimensions
+  (V2 (view _1 (bottomRight mapViewportRectangle)) 0)
+  (V2 20 (view _2 screenSize))
+
+makeViewports :: Viewports
+makeViewports = Viewports
+  { mapViewport = Viewport mapViewportRectangle (Just ((), Colour 0xFF000000))
+  , bottomViewport = Viewport bottomViewportRectangle (Just ((), Colour 0xFF222222))
+  , sideViewport = Viewport sideViewportRectangle (Just ((), Colour 0xFF222222))
+  }
 
 main :: IO ()
 main = runEff $ runBreadcrumbs Nothing $
   evalStateShared defaultMetadata $ do
     w <- withV2 screenSize (roomMap screenSize)
-    evalStateShared (World emptyStore w [] (Timestamp 0) (Entity 0)) $
+    evalStateShared (World emptyStore w [] (Timestamp 0) (Entity 0) makeViewports) $
       runQueryAsState $
       runTileMapAsState $ do
-        pId <- generateEntity
-        let player =
-              (Object
-                { name = "player"
-                , description = ""
-                , objectId = pId
-                , objectType = ObjectKind "player"
-                , creationTime = Timestamp 0
-                , modifiedTime = Timestamp 0
-                , position = V2 20 15
-                , renderable = Renderable '@' (fromRGB 0x75 0xa2 0xeb ) (Colour 0x00000000)
-                , objectData = PlayerSpecifics $ Player { viewshed = Viewshed S.empty 20}
-                })
-        setObject player
         withWindow
           defaultWindowOptions { size = Just screenSize }
           (do
             terminalSetText "log: file='awa.log', level=trace;"
-            terminalSetText "font: 'Boxy.ttf', size=24"
+            terminalSetText "font: 'Boxy.ttf', codepage=437, size=18"
+            buildWorld
           )
           (const runLoop)
           pass
+
+makeAllViewshedsDirty :: (State World :> es, ObjectQuery Object :> es) => Eff es ()
+makeAllViewshedsDirty = traverseObjects $ \t -> do
+  let mbVs = getViewshedMaybe t
+  whenJust mbVs $ const $ #dirtyViewsheds %= (getID t :)
+  return Nothing
+
+makeObject ::
+  State World :> es
+  => ObjectQuery Object :> es
+  => Text
+  -> ObjectKind
+  -> V2
+  -> Renderable
+  -> ObjectSpecifics
+  -> (Object -> Object)
+  -> Eff es Entity
+makeObject name kind pos renderable spec f = do
+  t <- use #turn
+  e <- generateEntity
+  setObject $ f $ Object
+    { name
+    , description = ""
+    , objectId = e
+    , objectType = kind
+    , creationTime = t
+    , modifiedTime = t
+    , position = pos
+    , renderable
+    , objectData = spec
+    }
+  return e
+
+playerRenderable :: Renderable
+playerRenderable = Renderable '@' (fromRGB 0x75 0xa2 0xeb) (Colour 0x00000000)
+
+playerData :: ObjectSpecifics
+playerData = PlayerSpecifics $ Player { viewshed = Viewshed S.empty 20}
+
+goblinRenderable :: Renderable
+goblinRenderable = Renderable 'g' (fromRGB 255 30 30) (Colour 0x00000000)
+
+orcRenderable :: Renderable
+orcRenderable = Renderable 'o' (fromRGB 220 50 30) (Colour 0x00000000)
+
+goblinData :: ObjectSpecifics
+goblinData = MonsterSpecifics $ Monster { viewshed = Viewshed S.empty 6}
+
+buildWorld ::
+  State World :> es
+  => ObjectQuery Object :> es
+  => IOE :> es
+  => Eff es ()
+buildWorld = do
+  rooms <- use @World (#tileMap % #rooms)
+  let playerPos = case listToMaybe rooms of
+        Nothing -> V2 20 15
+        Just x -> centre x + V2 1 1
+  makeObject "player" (ObjectKind "player") playerPos playerRenderable playerData id
+
+  forM_ rooms $ \room -> do
+    monsterChoice <- randomIO @Bool
+    if monsterChoice then
+
+      makeObject "goblin" (ObjectKind "goblin") (centre room) goblinRenderable goblinData id
+    else
+      makeObject "orc" (ObjectKind "orc") (centre room) orcRenderable goblinData id
+  makeAllViewshedsDirty
 
 defaultMetadata :: Metadata
 defaultMetadata = Metadata False
@@ -166,9 +245,10 @@ runLoop ::
   => Eff es ()
 runLoop = do
   everyTurn
-  terminalClear
-  renderMap
-  renderObjects
+  vt <- getVisibleTiles
+  renderMap vt
+  renderObjects vt
+  renderBottomTerminal
   terminalRefresh
   handleEvents Blocking $ \case
     Keypress kp -> do
@@ -182,40 +262,65 @@ runLoop = do
     WindowEvent WindowClose -> ((.=) @_ @Metadata) #pendingQuit True
   ifM (use @Metadata #pendingQuit) pass runLoop
 
-renderMap ::
-  TileMap :> es
-  => ObjectQuery Object :> es
-  => State World :> es
+getVisibleTiles ::
+   ObjectQuery Object :> es
+  => Eff es (S.Set V2)
+getVisibleTiles = do
+  pl <- getObject playerId
+  let vs = fromMaybe (error "implement some proper fucking object tagging you dumb cunt") $ getViewshedMaybe pl
+  return (vs ^. #visibleTiles)
+
+renderBottomTerminal ::
+  State World :> es
   => IOE :> es
   => Eff es ()
-renderMap = do
-  es <- use #tileMap
-  traverseArrayWithCoord_ (es ^. #revealedTiles) $ \p rev -> when rev $ do
+renderBottomTerminal = do
+  w <- get
+  clearViewport (w ^. #viewports % #bottomViewport)
+  withViewport (w ^. #viewports % #bottomViewport) $ do
+    borderViewport (Colour 0xFF999999) unicodeBorders
+    viewportDrawTile (V2 4 5) Nothing (Colour 0xFF6644AA) '?'
+  clearViewport (w ^. #viewports % #sideViewport)
+  withViewport (w ^. #viewports % #sideViewport) $ do
+    borderViewport (Colour 0xFF999999) unicodeBorders
+    viewportDrawTile (V2 3 3) Nothing (Colour 0xFF6644AA) '!'
+
+renderMap ::
+  TileMap :> es
+  => State World :> es
+  => IOE :> es
+  => S.Set V2
+  -> Eff es ()
+renderMap vt= do
+  w <- get
+  clearViewport (w ^. #viewports % #mapViewport)
+  let es = w ^. #tileMap
+  traverseArrayWithCoord_ (es ^. #revealedTiles) $ \p rev -> when rev $ whenInViewport (w ^. #viewports % #mapViewport) p $ do
     t <- getTile p
     let r = t ^. #renderable
     terminalColour (desaturate $ toGreyscale $ r ^. #foreground)
     terminalBkColour (desaturate $ toGreyscale $ r ^. #background)
     void $ withV2 p terminalPrintText (one $ r ^. #glyph)
-  pl <- getObject playerId
-  let vs = fromMaybe (error "") $ getViewshedMaybe pl
-  forM_ (vs ^. #visibleTiles) $ \a -> do
+  forM_ vt $ \a -> whenInViewport (w ^. #viewports % #mapViewport) a $ do
     t <- getTile a
     let r = t ^. #renderable
     terminalColour (r ^. #foreground)
     terminalBkColour (r ^. #background)
-    withV2 a terminalPrintText (one $ r ^. #glyph)
+    void $ withV2 a terminalPrintText (one $ r ^. #glyph)
 
 renderObjects ::
   State World :> es
   => IOE :> es
-  => Eff es ()
-renderObjects = do
+  => S.Set V2
+  -> Eff es ()
+renderObjects vt = do
   es <- use #objects
-  forM_ es $ \v -> do
+  forM_ es $ \v -> when ((v ^. #position) `S.member` vt) $ do
     let r = v ^. #renderable
     terminalColour (r ^. #foreground)
     terminalBkColour (r ^. #background)
     terminalPrintText (v ^. #position % _1) (v ^. #position % _2) (one $ r ^. #glyph)
+    pass
 
 everyTurn ::
   ObjectQuery Object :> es
@@ -241,6 +346,6 @@ updateViewshed e = do
   whenJust v $ \v' -> do
     let fov = calculateFov tm (view #position o) (range v')
     modifyViewshed o (#visibleTiles .~ fov)
-    #tileMap % #revealedTiles %= (\rt -> rt //@ map (,True) (S.toList fov))
+    when (playerId == e) $ #tileMap % #revealedTiles %= (\rt -> rt //@ map (,True) (S.toList fov))
   --update it...
   pass
