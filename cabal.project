@@ -18,7 +18,6 @@ packages:
   tony-zorks-rogue-skater/tony-zorks-rogue-skater.cabal
   bearlibterminal-hs/bearlibterminal.cabal
   roguefunctor/roguefunctor.cabal
-  roguefunctor/roguelike-tutorial/part1/hs-rogue/hs-rogue.cabal
 
 -- documentation: true
 -- haddock-internal: true
