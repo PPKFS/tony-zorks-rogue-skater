@@ -8,7 +8,6 @@ import Rogue.Array2D.Boxed
 import Rogue.Colour
 import Rogue.Config
 import Rogue.Events
-import Rogue.FieldOfView.Raycasting
 import Rogue.FieldOfView.Visibility
 import Rogue.Geometry.Rectangle
 import Rogue.ObjectQuery
@@ -20,13 +19,15 @@ import TZRS.Object
 import TZRS.Prelude
 import TZRS.RuleEffects
 import TZRS.Rulebook
-import TZRS.Run
 import TZRS.Store
 import TZRS.World
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import System.Random (randomRIO, randomIO)
-import System.Random.Stateful (UniformRange(uniformRM))
+import System.Random (randomIO)
+import TZRS.Viewshed
+import Data.Time
+import Data.Time.Clock.POSIX
+import qualified Data.Vector as V
 
 screenSize :: V2
 screenSize = V2 130 80
@@ -54,8 +55,8 @@ makeViewports = Viewports
 main :: IO ()
 main = runEff $ runBreadcrumbs Nothing $
   evalStateShared defaultMetadata $ do
-    w <- withV2 screenSize (roomMap screenSize)
-    evalStateShared (World emptyStore w [] (Timestamp 0) (Entity 0) makeViewports) $
+    w <- withV2 (bottomRight mapViewportRectangle) (roomMap (bottomRight mapViewportRectangle))
+    evalStateShared (World emptyStore w [] (Timestamp 0) (Entity 0) makeViewports (Entity (-1)) 0) $
       runQueryAsState $
       runTileMapAsState $ do
         withWindow
@@ -113,7 +114,7 @@ orcRenderable :: Renderable
 orcRenderable = Renderable 'o' (fromRGB 220 50 30) (Colour 0x00000000)
 
 goblinData :: ObjectSpecifics
-goblinData = MonsterSpecifics $ Monster { viewshed = Viewshed S.empty 6}
+goblinData = MonsterSpecifics $ Monster { viewshed = Viewshed S.empty 20}
 
 buildWorld ::
   State World :> es
@@ -125,16 +126,17 @@ buildWorld = do
   let playerPos = case listToMaybe rooms of
         Nothing -> V2 20 15
         Just x -> centre x + V2 1 1
-  makeObject "player" (ObjectKind "player") playerPos playerRenderable playerData id
+  p <- makeObject "player" (ObjectKind "player") playerPos playerRenderable playerData id
+  #player .= p
 
-  forM_ rooms $ \room -> do
+  forM_ (zip [1..] rooms) $ \(i, room) -> do
     monsterChoice <- randomIO @Bool
     if monsterChoice then
-
-      makeObject "goblin" (ObjectKind "goblin") (centre room) goblinRenderable goblinData id
+      makeObject ("goblin #" <> show i) (ObjectKind "monster") (centre room) goblinRenderable goblinData id
     else
-      makeObject "orc" (ObjectKind "orc") (centre room) orcRenderable goblinData id
+      makeObject ("orc #" <> show i) (ObjectKind "monster") (centre room) orcRenderable goblinData id
   makeAllViewshedsDirty
+  updateViewsheds
 
 defaultMetadata :: Metadata
 defaultMetadata = Metadata False
@@ -175,10 +177,8 @@ cantMoveIntoWalls :: Rule Unconstrained MoveArguments Bool
 cantMoveIntoWalls = makeRule "can't walk into walls rule" [] $ \ma -> do
   let newLoc = calculateNewLocation (object ma) (direction ma)
   ti <- getTile newLoc
- {-} if walkable ti then rulePass else do
-    traceShow "nope can't walk through a wall" pass
-    return (Just False)-}
-  rulePass
+  if walkable ti then rulePass else do
+    return (Just False)
 
 calculateNewLocation :: Object -> Direction -> V2
 calculateNewLocation o dir = (o ^. #position) &
@@ -194,14 +194,15 @@ moveIt = makeRule "move rule" [] $ \ma -> do
   moveObject (getID $ object ma) (direction ma)
   return (Just True)
 
-
 runQueryAsState ::
   State World :> es
   => Eff (ObjectQuery Object : es) a
   -> Eff es a
 runQueryAsState = interpret $ \env -> \case
   GenerateEntity -> #entityCounter <<%= (+1)
-  SetObject r -> #objects % at (getID r) %= updateIt r
+  SetObject r -> do
+    #objects % at (getID r) %= updateIt r
+    --whenJust (getViewshedMaybe r) $ const (makeViewshedDirty . getID $ r)
   GetObject e -> do
     let i = getID e
     mbObj <- use $ #objects % at i
@@ -246,20 +247,28 @@ runLoop ::
 runLoop = do
   everyTurn
   vt <- getVisibleTiles
+  terminalClear
+  t1 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
   renderMap vt
+  t2 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
   renderObjects vt
+  t3 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
   renderBottomTerminal
   terminalRefresh
-  handleEvents Blocking $ \case
+  t4 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
+  handleEvents NotBlocking $ \case
     Keypress kp -> do
-      putStrLn $ "Handling keypress: " <> show kp
+      --putStrLn $ "Handling keypress: " <> show kp
       case asMovement kp of
         Just mvDir -> do
-          pl <- use @World (#objects % at playerId)
-          void $ runRulebook Nothing moveRulebook (MoveArguments (fromMaybe (error "no player") pl) mvDir)
+          pl <- use @World #player >>= getObject
+          void $ runRulebook Nothing moveRulebook (MoveArguments pl mvDir)
         Nothing -> putStrLn ("unknown keypress: " <> show kp)
+      when (kp == TkEsc) $ ((.=) @_ @Metadata) #pendingQuit True
     WindowEvent Resize -> pass
     WindowEvent WindowClose -> ((.=) @_ @Metadata) #pendingQuit True
+  t5 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
+  liftIO $ print (map show [t5-t4, t4-t3, t3-t2, t2-t1])
   ifM (use @Metadata #pendingQuit) pass runLoop
 
 getVisibleTiles ::
@@ -291,22 +300,31 @@ renderMap ::
   => IOE :> es
   => S.Set V2
   -> Eff es ()
-renderMap vt= do
+renderMap vt = do
   w <- get
   clearViewport (w ^. #viewports % #mapViewport)
   let es = w ^. #tileMap
+  t1 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
+  --print ((\(Array2D (v, _)) -> V.length v) $ es ^. #revealedTiles )
+  #randomTest .= 0
   traverseArrayWithCoord_ (es ^. #revealedTiles) $ \p rev -> when rev $ whenInViewport (w ^. #viewports % #mapViewport) p $ do
     t <- getTile p
     let r = t ^. #renderable
     terminalColour (desaturate $ toGreyscale $ r ^. #foreground)
     terminalBkColour (desaturate $ toGreyscale $ r ^. #background)
     void $ withV2 p terminalPrintText (one $ r ^. #glyph)
+    #randomTest %= (+1)
+  r <- use #randomTest
+  print r
+  t2 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
   forM_ vt $ \a -> whenInViewport (w ^. #viewports % #mapViewport) a $ do
     t <- getTile a
     let r = t ^. #renderable
     terminalColour (r ^. #foreground)
     terminalBkColour (r ^. #background)
     void $ withV2 a terminalPrintText (one $ r ^. #glyph)
+  t3 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
+  liftIO $ print (map show [t3-t2, t2-t1])
 
 renderObjects ::
   State World :> es
@@ -323,29 +341,22 @@ renderObjects vt = do
     pass
 
 everyTurn ::
-  ObjectQuery Object :> es
+  IOE :> es => ObjectQuery Object :> es
   => State World :> es
   => Eff es ()
 everyTurn = do
   tickTurn
   updateViewsheds
-  -- update all (dirty) viewsheds
-  -- each AI entity should then see if it wants to act
+  monstersThink
 
-updateViewsheds :: ObjectQuery Object :> es => State World :> es => Eff es ()
-updateViewsheds = do
-  vs <- use #dirtyViewsheds
-  #dirtyViewsheds .= []
-  forM_ vs updateViewshed
-
-updateViewshed :: ObjectQuery Object :> es => State World :> es => Entity -> Eff es ()
-updateViewshed e = do
-  o <- getObject e
-  tm <- use #tileMap
-  let v = getViewshedMaybe o
-  whenJust v $ \v' -> do
-    let fov = calculateFov tm (view #position o) (range v')
-    modifyViewshed o (#visibleTiles .~ fov)
-    when (playerId == e) $ #tileMap % #revealedTiles %= (\rt -> rt //@ map (,True) (S.toList fov))
-  --update it...
-  pass
+monstersThink :: IOE :> es => ObjectQuery Object :> es => State World :> es => Eff es ()
+monstersThink = do
+  p <- position <$> getObject (Entity 0)
+  traverseObjects $ \o -> do
+    if objectType o == "monster" then do
+      let mbVs = getViewshedMaybe o
+      whenJust mbVs $ \v -> do
+        when (p `S.member` visibleTiles v) $
+          print $ view #name o <> " yells insults at you"
+      return Nothing
+    else return Nothing

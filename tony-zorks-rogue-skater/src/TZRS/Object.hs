@@ -97,3 +97,10 @@ instance Eq Object where
 -- | Maybe I'll need this instance for something or other?
 instance Ord Object where
   compare = (. creationTime) . compare . creationTime
+
+forKind ::
+  ObjectKind
+  -> Object
+  -> Eff es a
+  -> Eff es (Maybe a)
+forKind k o f = if objectType o == k then Just <$> f else return Nothing

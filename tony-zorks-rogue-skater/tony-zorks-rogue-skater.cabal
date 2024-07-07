@@ -34,7 +34,8 @@ common common-options
     mono-traversable,
     vector,
     random,
-    roguefunctor
+    roguefunctor,
+    time
 
   ghc-options:
     -Wall -Wcompat -Widentities -Wredundant-constraints
@@ -77,6 +78,6 @@ executable tony-zorks-rogue-skater
     TZRS.Rulebook
     TZRS.Object
     TZRS.Store
-    TZRS.Run
+    TZRS.Viewshed
   extra-lib-dirs:
     /Users/avery/tony-zorks-rogue-skater

@@ -7,7 +7,6 @@ import Effectful.Dispatch.Dynamic
 import Effectful.TH
 import qualified Rogue.Tilemap as TM
 import Rogue.Array2D.Boxed
-import Effectful.State.Dynamic (State)
 import Rogue.FieldOfView.Visibility
 import qualified Data.Vector as V
 import Rogue.Geometry.Rectangle
@@ -25,6 +24,8 @@ data World = World
   , turn :: Timestamp
   , entityCounter :: Entity
   , viewports :: Viewports
+  , player :: Entity
+  , randomTest :: Integer
   } deriving stock (Generic)
 
 data Viewports = Viewports
