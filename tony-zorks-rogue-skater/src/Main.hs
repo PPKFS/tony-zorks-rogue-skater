@@ -248,15 +248,11 @@ runLoop = do
   everyTurn
   vt <- getVisibleTiles
   terminalClear
-  t1 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
   renderMap vt
-  t2 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
   renderObjects vt
-  t3 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
   renderBottomTerminal
   terminalRefresh
-  t4 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
-  handleEvents NotBlocking $ \case
+  handleEvents Blocking $ \case
     Keypress kp -> do
       --putStrLn $ "Handling keypress: " <> show kp
       case asMovement kp of
@@ -267,8 +263,6 @@ runLoop = do
       when (kp == TkEsc) $ ((.=) @_ @Metadata) #pendingQuit True
     WindowEvent Resize -> pass
     WindowEvent WindowClose -> ((.=) @_ @Metadata) #pendingQuit True
-  t5 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
-  liftIO $ print (map show [t5-t4, t4-t3, t3-t2, t2-t1])
   ifM (use @Metadata #pendingQuit) pass runLoop
 
 getVisibleTiles ::
@@ -304,27 +298,18 @@ renderMap vt = do
   w <- get
   clearViewport (w ^. #viewports % #mapViewport)
   let es = w ^. #tileMap
-  t1 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
-  --print ((\(Array2D (v, _)) -> V.length v) $ es ^. #revealedTiles )
-  #randomTest .= 0
   traverseArrayWithCoord_ (es ^. #revealedTiles) $ \p rev -> when rev $ whenInViewport (w ^. #viewports % #mapViewport) p $ do
     t <- getTile p
     let r = t ^. #renderable
     terminalColour (desaturate $ toGreyscale $ r ^. #foreground)
     terminalBkColour (desaturate $ toGreyscale $ r ^. #background)
     void $ withV2 p terminalPrintText (one $ r ^. #glyph)
-    #randomTest %= (+1)
-  r <- use #randomTest
-  print r
-  t2 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
   forM_ vt $ \a -> whenInViewport (w ^. #viewports % #mapViewport) a $ do
     t <- getTile a
     let r = t ^. #renderable
     terminalColour (r ^. #foreground)
     terminalBkColour (r ^. #background)
     void $ withV2 a terminalPrintText (one $ r ^. #glyph)
-  t3 <- nominalDiffTimeToSeconds <$> liftIO getPOSIXTime
-  liftIO $ print (map show [t3-t2, t2-t1])
 
 renderObjects ::
   State World :> es

@@ -32,8 +32,8 @@ updateViewshed e = do
   tm <- use #tileMap
   let v = getViewshedMaybe o
   whenJust v $ \v' -> do
-    fov <- pure $ calculateFov tm (view #position o) (range v')
+    let fov = calculateFov tm (view #position o) (range v')
     modifyViewshed o (#visibleTiles .~ fov)
-    --when (p == e) $ #tileMap % #revealedTiles %= (\rt -> rt //@ map (,True) (S.toList fov))
+    when (p == e) $ #tileMap % #revealedTiles %= (\rt -> rt //@ map (,True) (S.toList fov))
   --update it...
   pass
