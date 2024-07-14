@@ -16,6 +16,8 @@ import qualified Data.IntSet as IS
 import Rogue.Geometry.Line
 import TZRS.Entity
 import Rogue.Rendering.Viewport
+import Rogue.Tilemap (WalkabilityMap)
+import qualified Data.Set as S
 
 data World = World
   { objects :: Store Object
@@ -47,6 +49,7 @@ data Tiles = Tiles
   { tileMap :: Array2D TileInfo
   , revealedTiles :: Array2D Bool
   , rooms :: [Rectangle]
+  , walkableTiles :: Array2D Bool
   } deriving stock (Generic, Show)
 
 makeFieldLabelsNoPrefix ''Tiles
@@ -58,8 +61,11 @@ instance TM.Tilemap Tiles TileInfo where
 
 instance VisibilityMap Tiles where
   positionBlocksVisibility t p = not $ view #walkable $ TM.getTile t p
-  dimensions (Tiles (Array2D (_, d)) _ _) = d
+  dimensions (Tiles (Array2D (_, d)) _ _ _) = d
 
+instance WalkabilityMap Tiles where
+  dimensions (Tiles (Array2D (_, d)) _ _ _) = d
+  positionBlocksMovement t = not <$> TM.getTile (t ^. #walkableTiles)
 makeFieldLabelsNoPrefix ''World
 
 tickTurn :: State World :> es => Eff es ()
@@ -119,11 +125,11 @@ randomWalls (V2 w h) numWalls = do
             V2 0 _ -> wall
             V2 _ 0 -> wall
             V2 x y -> if x == wMax || y == hMax || (i `IS.member` is) then wall else floorTile)
-  return Tiles { tileMap = Array2D (v, V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h), rooms = [] }
+  return Tiles { tileMap = Array2D (v, V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h), rooms = [], walkableTiles = error "todo" }
 
 roomMap :: IOE :> es => V2 -> Int -> Int -> Eff es Tiles
 roomMap screenSize w h = do
-  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h), rooms = [] }
+  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h), rooms = [] , walkableTiles = Array2D (V.generate (w*h) (const False), V2 w h) }
   let numRooms = 30; minSize = 6; maxSize = 10
   allPossibleRooms <- mapM (const $ do
     dims <- let d = (minSize, maxSize) in V2 <$> randomRIO d <*> randomRIO d
@@ -141,9 +147,10 @@ roomMap screenSize w h = do
                   else digHorizontalTunnel oldP (newX - prevX) . digVerticalTunnel newP (prevY - newY)
               updF = maybe id digStuff $ listToMaybe rooms
           in (newRoom:rooms, updF $ digRectangle newRoom tm)) ([], t) allPossibleRooms
-  return (tiles & #rooms .~ rs)
+
+  return (tiles & #rooms .~ rs & #walkableTiles .~ fmap walkable (tiles ^. #tileMap))
 
 roomMap2 :: Int -> Int -> Tiles
 roomMap2 w h = do
-  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h), rooms = [] }
+  let t = Tiles { tileMap = Array2D (V.generate (w*h) (const wall), V2 w h), revealedTiles = Array2D (V.generate (w*h) (const False), V2 w h), rooms = [] , walkableTiles = error "todo" }
     in foldl' (\tm v -> digRectangle (Rectangle v v) tm) t (mconcat $ circleRays (V2 30 30) 15)

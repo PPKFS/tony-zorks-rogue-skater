@@ -1,6 +1,6 @@
 cradle:
   cabal:
-    - path: "tony-zorks-rogue-skater/src"
+    - path: "tony-zorks-rogue-skater"
       component: "executable:tony-zorks-rogue-skater"
 
     - path: "solitude"
@@ -10,10 +10,7 @@ cradle:
       component: "lib:breadcrumbs"
 
     - path: "bearlibterminal-hs"
-      component: "lib:bearlibterminal-hs"
+      component: "lib:bearlibterminals"
 
     - path: "roguefunctor"
       component: "lib:roguefunctor"
-
-    - path: "roguefunctor/roguelike-tutorial/part1/hs-rogue/app"
-      component: "executable:hs-rogue"

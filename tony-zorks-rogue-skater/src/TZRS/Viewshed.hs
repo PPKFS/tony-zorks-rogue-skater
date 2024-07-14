@@ -19,7 +19,6 @@ makeViewshedDirty v = #dirtyViewsheds %= (v:)
 updateViewsheds :: ObjectQuery Object :> es => State World :> es => Eff es ()
 updateViewsheds = do
   vs <- use #dirtyViewsheds
-  traceShow ("viewsheds: " <> show (length vs)) pass
   #dirtyViewsheds .= []
   pass
   forM_ vs updateViewshed

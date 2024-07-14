@@ -64,6 +64,7 @@ data Object = Object
   , position :: V2
   , renderable :: Renderable
   , objectData :: ObjectSpecifics
+  , occupiesTile :: Bool
   } deriving stock (Generic)
 
 makeFieldLabelsNoPrefix ''Object

@@ -28,6 +28,7 @@ import TZRS.Viewshed
 import Data.Time
 import Data.Time.Clock.POSIX
 import qualified Data.Vector as V
+import Rogue.AStar
 
 screenSize :: V2
 screenSize = V2 130 80
@@ -98,6 +99,7 @@ makeObject name kind pos renderable spec f = do
     , position = pos
     , renderable
     , objectData = spec
+    , occupiesTile = True
     }
   return e
 
@@ -141,7 +143,7 @@ buildWorld = do
 defaultMetadata :: Metadata
 defaultMetadata = Metadata False
 
-data Direction = LeftDir | RightDir | UpDir | DownDir
+data Direction = LeftDir | RightDir | UpDir | DownDir | UpLeftDir | DownRightDir | UpRightDir | DownLeftDir
 
 playerId :: Entity
 playerId = Entity 0
@@ -176,9 +178,8 @@ moveRulebook = (blankRulebook "move rulebook")
 cantMoveIntoWalls :: Rule Unconstrained MoveArguments Bool
 cantMoveIntoWalls = makeRule "can't walk into walls rule" [] $ \ma -> do
   let newLoc = calculateNewLocation (object ma) (direction ma)
-  ti <- getTile newLoc
-  if walkable ti then rulePass else do
-    return (Just False)
+  bm <- (!@ newLoc) <$> use @World (#tileMap % #walkableTiles)
+  if bm then rulePass else return (Just False)
 
 calculateNewLocation :: Object -> Direction -> V2
 calculateNewLocation o dir = (o ^. #position) &
@@ -187,6 +188,10 @@ calculateNewLocation o dir = (o ^. #position) &
       RightDir -> _1 %~ (+1)
       UpDir -> _2 %~ subtract 1
       DownDir -> _2 %~ (+1)
+      UpRightDir -> (\(V2 x y) -> V2 (x+1) (y-1))
+      DownRightDir -> (\(V2 x y) -> V2 (x+1) (y+1))
+      UpLeftDir -> (\(V2 x y) -> V2 (x-1) (y-1))
+      DownLeftDir -> (\(V2 x y) -> V2 (x-1) (y+1))
     )
 
 moveIt :: Rule Unconstrained MoveArguments Bool
@@ -202,6 +207,7 @@ runQueryAsState = interpret $ \env -> \case
   GenerateEntity -> #entityCounter <<%= (+1)
   SetObject r -> do
     #objects % at (getID r) %= updateIt r
+    when (occupiesTile r) $ #tileMap % #walkableTiles %= \wt -> wt // (position r, False)
     --whenJust (getViewshedMaybe r) $ const (makeViewshedDirty . getID $ r)
   GetObject e -> do
     let i = getID e
@@ -227,13 +233,20 @@ moveObject ::
   -> Direction
   -> Eff es ()
 moveObject e dir = do
-  modifyObject e (#position %~
-    (case dir of
-      LeftDir -> _1 %~ subtract 1
-      RightDir -> _1 %~ (+1)
-      UpDir -> _2 %~ subtract 1
-      DownDir -> _2 %~ (+1)
-    ))
+  o <- getObject e
+  when (occupiesTile o) $ #tileMap % #walkableTiles %= \wt -> wt // (position o, True)
+  let newPos = position o &
+        (case dir of
+          LeftDir -> _1 %~ subtract 1
+          RightDir -> _1 %~ (+1)
+          UpDir -> _2 %~ subtract 1
+          DownDir -> _2 %~ (+1)
+          UpRightDir -> (\(V2 x y) -> V2 (x+1) (y-1))
+          DownRightDir -> (\(V2 x y) -> V2 (x+1) (y+1))
+          UpLeftDir -> (\(V2 x y) -> V2 (x-1) (y-1))
+          DownLeftDir -> (\(V2 x y) -> V2 (x-1) (y+1))
+        )
+  modifyObject e (#position .~ newPos)
   #dirtyViewsheds %= (e:)
 
 runLoop ::
@@ -266,7 +279,7 @@ runLoop = do
   ifM (use @Metadata #pendingQuit) pass runLoop
 
 getVisibleTiles ::
-   ObjectQuery Object :> es
+  ObjectQuery Object :> es
   => Eff es (S.Set V2)
 getVisibleTiles = do
   pl <- getObject playerId
@@ -309,6 +322,7 @@ renderMap vt = do
     let r = t ^. #renderable
     terminalColour (r ^. #foreground)
     terminalBkColour (r ^. #background)
+    --if (w ^. #tileMap % #walkableTiles) !@ a then terminalBkColour (Colour 0xFF0000FF) else terminalBkColour (Colour 0xFFFFFF44)
     void $ withV2 a terminalPrintText (one $ r ^. #glyph)
 
 renderObjects ::
@@ -326,7 +340,7 @@ renderObjects vt = do
     pass
 
 everyTurn ::
-  IOE :> es => ObjectQuery Object :> es
+  TileMap :> es => Breadcrumbs :> es => IOE :> es => State Metadata :> es => ObjectQuery Object :> es
   => State World :> es
   => Eff es ()
 everyTurn = do
@@ -334,14 +348,32 @@ everyTurn = do
   updateViewsheds
   monstersThink
 
-monstersThink :: IOE :> es => ObjectQuery Object :> es => State World :> es => Eff es ()
+monstersThink :: TileMap :> es => Breadcrumbs :> es => IOE :> es => State Metadata :> es => ObjectQuery Object :> es => State World :> es => Eff es ()
 monstersThink = do
   p <- position <$> getObject (Entity 0)
   traverseObjects $ \o -> do
     if objectType o == "monster" then do
-      let mbVs = getViewshedMaybe o
-      whenJust mbVs $ \v -> do
-        when (p `S.member` visibleTiles v) $
+      whenJust (getViewshedMaybe o) $ \v -> do
+        when (p `S.member` visibleTiles v) $ do
           print $ view #name o <> " yells insults at you"
+          m <- use @World #tileMap
+          print (V.length $ V.filter id $ toVector $ m ^. #walkableTiles)
+          r <- findPath m (position o) p
+          print r
+          case r of
+            Just (nextStep:_:_) -> void $ runRulebook Nothing moveRulebook (MoveArguments o (directionFromPoints (position o) nextStep))
+            _ -> pass
       return Nothing
     else return Nothing
+
+directionFromPoints :: V2 -> V2 -> Direction
+directionFromPoints loc dest = case dest - loc of
+  V2 (-1) 0 -> LeftDir
+  V2 1 0 -> RightDir
+  V2 0 1 -> DownDir
+  V2 0 (-1) -> UpDir
+  V2 (-1) (-1) -> UpLeftDir
+  V2 (-1) 1 -> DownLeftDir
+  V2 1 1 -> DownRightDir
+  V2 1 (-1) -> UpRightDir
+  _ -> error "invalid"
