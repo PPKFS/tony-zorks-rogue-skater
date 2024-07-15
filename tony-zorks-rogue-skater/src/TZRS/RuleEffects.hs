@@ -28,7 +28,7 @@ type RuleEffects es = (
   , ObjectQuery Object :> es
   , State World :> es
   , Breadcrumbs :> es
-  , TileMap :> es
+  --, TileMap :> es
   )
 
 class SayableValue s where

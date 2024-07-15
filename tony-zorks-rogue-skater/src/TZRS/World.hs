@@ -3,11 +3,8 @@ module TZRS.World where
 import TZRS.Store
 import TZRS.Object
 import TZRS.Prelude
-import Effectful.Dispatch.Dynamic
-import Effectful.TH
 import qualified Rogue.Tilemap as TM
 import Rogue.Array2D.Boxed
-import Rogue.FieldOfView.Visibility
 import qualified Data.Vector as V
 import Rogue.Geometry.Rectangle
 import Rogue.Colour
@@ -17,7 +14,6 @@ import Rogue.Geometry.Line
 import TZRS.Entity
 import Rogue.Rendering.Viewport
 import Rogue.Tilemap (WalkabilityMap)
-import qualified Data.Set as S
 
 data World = World
   { objects :: Store Object
@@ -59,18 +55,25 @@ instance TM.Tilemap Tiles TileInfo where
   setTile tm t p = tm & #tileMap %~ (\tm' -> TM.setTile tm' t p)
   setTiles tm ls = tm & #tileMap %~ (`TM.setTiles` ls)
 
-instance VisibilityMap Tiles where
+instance TM.VisibilityMap Tiles where
   positionBlocksVisibility t p = not $ view #walkable $ TM.getTile t p
-  dimensions (Tiles (Array2D (_, d)) _ _ _) = d
 
 instance WalkabilityMap Tiles where
-  dimensions (Tiles (Array2D (_, d)) _ _ _) = d
   positionBlocksMovement t = not <$> TM.getTile (t ^. #walkableTiles)
 makeFieldLabelsNoPrefix ''World
 
 tickTurn :: State World :> es => Eff es ()
 tickTurn = #turn %= (+1)
 
+
+
+unsafeMaybe :: Lens' (Maybe a) a
+unsafeMaybe = lens (fromMaybe (error "unsafeMaybe")) (\_ y -> Just y)
+
+tile :: V2 -> Lens' World TileInfo
+tile loc = lens (\w -> fromMaybe (error "") $ w ^? #tileMap % #tileMap % ix loc) (\w t -> w & #tileMap % #tileMap % ix loc .~ t)
+
+{-}
 data TileMap :: Effect where
   SetTile :: TileInfo -> V2 -> TileMap m ()
   SetTiles :: [(V2, TileInfo)] -> TileMap m ()
@@ -86,7 +89,7 @@ runTileMapAsState = interpret $ \_env -> \case
   SetTile tileKind pos -> #tileMap %= (\tm -> TM.setTile tm tileKind pos)
   GetTile pos -> (`TM.getTile` pos) <$> use #tileMap
   SetTiles ls -> #tileMap %= (`TM.setTiles` ls)
-
+-}
 
 floorTile :: TileInfo
 floorTile = TileInfo "floor" (Renderable '.' (Colour 0xFF008888) (Colour 0x00000000)) True

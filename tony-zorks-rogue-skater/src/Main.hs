@@ -59,7 +59,6 @@ main = runEff $ runBreadcrumbs Nothing $
     w <- withV2 (bottomRight mapViewportRectangle) (roomMap (bottomRight mapViewportRectangle))
     evalStateShared (World emptyStore w [] (Timestamp 0) (Entity 0) makeViewports (Entity (-1)) 0) $
       runQueryAsState $
-      runTileMapAsState $ do
         withWindow
           defaultWindowOptions { size = Just screenSize }
           (do
@@ -254,7 +253,6 @@ runLoop ::
   => ObjectQuery Object :> es
   => State Metadata :> es
   => Breadcrumbs :> es
-  => TileMap :> es
   => IOE :> es
   => Eff es ()
 runLoop = do
@@ -302,8 +300,7 @@ renderBottomTerminal = do
     viewportDrawTile (V2 3 3) Nothing (Colour 0xFF6644AA) '!'
 
 renderMap ::
-  TileMap :> es
-  => State World :> es
+  State World :> es
   => IOE :> es
   => S.Set V2
   -> Eff es ()
@@ -312,13 +309,13 @@ renderMap vt = do
   clearViewport (w ^. #viewports % #mapViewport)
   let es = w ^. #tileMap
   traverseArrayWithCoord_ (es ^. #revealedTiles) $ \p rev -> when rev $ whenInViewport (w ^. #viewports % #mapViewport) p $ do
-    t <- getTile p
+    t <- use $ tile p
     let r = t ^. #renderable
     terminalColour (desaturate $ toGreyscale $ r ^. #foreground)
     terminalBkColour (desaturate $ toGreyscale $ r ^. #background)
     void $ withV2 p terminalPrintText (one $ r ^. #glyph)
   forM_ vt $ \a -> whenInViewport (w ^. #viewports % #mapViewport) a $ do
-    t <- getTile a
+    t <- use $ tile a
     let r = t ^. #renderable
     terminalColour (r ^. #foreground)
     terminalBkColour (r ^. #background)
@@ -340,7 +337,7 @@ renderObjects vt = do
     pass
 
 everyTurn ::
-  TileMap :> es => Breadcrumbs :> es => IOE :> es => State Metadata :> es => ObjectQuery Object :> es
+  Breadcrumbs :> es => IOE :> es => State Metadata :> es => ObjectQuery Object :> es
   => State World :> es
   => Eff es ()
 everyTurn = do
@@ -348,7 +345,7 @@ everyTurn = do
   updateViewsheds
   monstersThink
 
-monstersThink :: TileMap :> es => Breadcrumbs :> es => IOE :> es => State Metadata :> es => ObjectQuery Object :> es => State World :> es => Eff es ()
+monstersThink :: Breadcrumbs :> es => IOE :> es => State Metadata :> es => ObjectQuery Object :> es => State World :> es => Eff es ()
 monstersThink = do
   p <- position <$> getObject (Entity 0)
   traverseObjects $ \o -> do
