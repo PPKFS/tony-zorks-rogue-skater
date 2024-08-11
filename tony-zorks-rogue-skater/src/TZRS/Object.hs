@@ -35,18 +35,30 @@ data ObjectSpecifics =
   | MonsterSpecifics MonsterSpecifics
   deriving stock (Generic)
 
+data CombatStats = CombatStats
+  { maxHP :: Int
+  , hp :: Int
+  , defense :: Int
+  , power :: Int
+  }
+
 data PlayerSpecifics = Player
   { viewshed :: Viewshed
+  , combat :: CombatStats
   } deriving stock (Generic)
 
 data MonsterSpecifics = Monster
   { viewshed :: Viewshed
+  , combat :: CombatStats
   } deriving stock (Generic)
 
 makePrisms ''ObjectSpecifics
 
 instance MayHaveProperty ObjectSpecifics Viewshed where
   propertyAT = (_MonsterSpecifics % #viewshed) `thenATraverse` (_PlayerSpecifics % #viewshed)
+
+instance MayHaveProperty ObjectSpecifics CombatStats where
+  propertyAT = (_MonsterSpecifics % #combat) `thenATraverse` (_PlayerSpecifics % #combat)
 
 data Renderable = Renderable
   { glyph :: Char

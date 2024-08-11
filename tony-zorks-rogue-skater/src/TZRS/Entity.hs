@@ -4,6 +4,8 @@ module TZRS.Entity
   , HasID(..)
   , TaggedEntity(unTag)
   , unsafeTagEntity
+  , TileEntity(..)
+  , _MobEntity
   ) where
 
 import TZRS.Prelude
@@ -40,3 +42,8 @@ unsafeTagEntity = TaggedEntity
 instance HasID (TaggedEntity t) where
   type Id (TaggedEntity t) = Entity
   getID = unTag
+
+data TileEntity = MobEntity Entity | ItemEntity Entity
+  deriving stock (Show, Generic, Eq, Ord)
+
+makePrisms ''TileEntity

@@ -31,20 +31,6 @@ type RuleEffects es = (
   --, TileMap :> es
   )
 
-class SayableValue s where
-  sayTell :: (Writer Text :> es, RuleEffects es) => s -> Eff es ()
-  say :: RuleEffects es => s -> Eff es ()
-  default say :: RuleEffects es => s -> Eff es ()
-  say s = do
-    r <- execWriter (sayTell s)
-    when (r /= "") $ pass --printText r
-
-instance SayableValue Text where
-  sayTell = tell
-
-instance SayableValue String where
-  sayTell = tell . toText
-
 type RuleEffectStack = '[
   ActionHandler
   , State Metadata

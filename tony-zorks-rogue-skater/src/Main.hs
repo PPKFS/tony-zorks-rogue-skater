@@ -25,8 +25,6 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.Random (randomIO)
 import TZRS.Viewshed
-import Data.Time
-import Data.Time.Clock.POSIX
 import qualified Data.Vector as V
 import Rogue.AStar
 
@@ -38,26 +36,26 @@ mapViewportRectangle = Rectangle (V2 0 0) (screenSize-V2 20 15)
 
 bottomViewportRectangle :: Rectangle
 bottomViewportRectangle = rectangleFromDimensions
-  (V2 0 (bottomEdge mapViewportRectangle + 1))
-  (V2 (view _1 screenSize - 20) 14)
+  (V2 0 (bottomEdge mapViewportRectangle))
+  (V2 (view _1 screenSize - 20) 15)
 
 sideViewportRectangle :: Rectangle
 sideViewportRectangle = rectangleFromDimensions
   (V2 (view _1 (bottomRight mapViewportRectangle)) 0)
   (V2 20 (view _2 screenSize))
 
-makeViewports :: Viewports
-makeViewports = Viewports
-  { mapViewport = Viewport mapViewportRectangle (Just ((), Colour 0xFF000000))
-  , bottomViewport = Viewport bottomViewportRectangle (Just ((), Colour 0xFF222222))
-  , sideViewport = Viewport sideViewportRectangle (Just ((), Colour 0xFF222222))
-  }
+mapViewport :: Viewport ()
+mapViewport = Viewport mapViewportRectangle (Just (Colour 0xFF333333)) Nothing
+bottomViewport :: Viewport ()
+bottomViewport = Viewport bottomViewportRectangle (Just (Colour 0xFFAAAA00)) (Just (unicodeBorders, Colour 0xFFFFFFFF))
+sideViewport :: Viewport ()
+sideViewport = Viewport sideViewportRectangle (Just (Colour 0xFF22AAFF)) (Just (unicodeBorders, Colour 0xFFFFFFFF))
 
 main :: IO ()
 main = runEff $ runBreadcrumbs Nothing $
   evalStateShared defaultMetadata $ do
     w <- withV2 (bottomRight mapViewportRectangle) (roomMap (bottomRight mapViewportRectangle))
-    evalStateShared (World emptyStore w [] (Timestamp 0) (Entity 0) makeViewports (Entity (-1)) 0) $
+    evalStateShared (World emptyStore w [] (Timestamp 0) (Entity 0) (Entity (-1)) 0) $
       runQueryAsState $
         withWindow
           defaultWindowOptions { size = Just screenSize }
@@ -88,25 +86,27 @@ makeObject ::
 makeObject name kind pos renderable spec f = do
   t <- use #turn
   e <- generateEntity
-  setObject $ f $ Object
-    { name
-    , description = ""
-    , objectId = e
-    , objectType = kind
-    , creationTime = t
-    , modifiedTime = t
-    , position = pos
-    , renderable
-    , objectData = spec
-    , occupiesTile = True
-    }
+  let obj = f $ Object
+        { name
+        , description = ""
+        , objectId = e
+        , objectType = kind
+        , creationTime = t
+        , modifiedTime = t
+        , position = pos
+        , renderable
+        , objectData = spec
+        , occupiesTile = True
+        }
+  setObject obj
+  placeInWorld obj pos
   return e
 
 playerRenderable :: Renderable
 playerRenderable = Renderable '@' (fromRGB 0x75 0xa2 0xeb) (Colour 0x00000000)
 
 playerData :: ObjectSpecifics
-playerData = PlayerSpecifics $ Player { viewshed = Viewshed S.empty 20}
+playerData = PlayerSpecifics $ Player { viewshed = Viewshed S.empty 20, combat = CombatStats 30 30 2 5 }
 
 goblinRenderable :: Renderable
 goblinRenderable = Renderable 'g' (fromRGB 255 30 30) (Colour 0x00000000)
@@ -115,7 +115,7 @@ orcRenderable :: Renderable
 orcRenderable = Renderable 'o' (fromRGB 220 50 30) (Colour 0x00000000)
 
 goblinData :: ObjectSpecifics
-goblinData = MonsterSpecifics $ Monster { viewshed = Viewshed S.empty 20}
+goblinData = MonsterSpecifics $ Monster { viewshed = Viewshed S.empty 20, combat = CombatStats 16 16 1 4 }
 
 buildWorld ::
   State World :> es
@@ -195,7 +195,8 @@ calculateNewLocation o dir = (o ^. #position) &
 
 moveIt :: Rule Unconstrained MoveArguments Bool
 moveIt = makeRule "move rule" [] $ \ma -> do
-  moveObject (getID $ object ma) (direction ma)
+  let newPos = simulateMove ma
+  moveObject (object ma) newPos
   return (Just True)
 
 runQueryAsState ::
@@ -228,25 +229,33 @@ updateIt newObj mbExisting = case mbExisting of
 moveObject ::
   ObjectQuery Object :> es
   => State World :> es
-  => Entity
-  -> Direction
+  => Object
+  -> V2
   -> Eff es ()
-moveObject e dir = do
-  o <- getObject e
+moveObject o newPos = do
+  removeFromWorld o
+  modifyObject (getID o) (#position .~ newPos)
+  placeInWorld o newPos
+  -- at this point, we know the move will succeed
+
+
+
+
+placeInWorld ::
+  State World :> es
+  => Object
+  -> V2
+  -> Eff es ()
+placeInWorld o newPos = do
+  #tileMap % #tileEntities % at newPos %= (Just . maybe (one (MobEntity (getID o))) ( S.insert (MobEntity (getID o))))
+  #dirtyViewsheds %= (getID o:)
+
+removeFromWorld ::
+  State World :> es
+  => Object -> Eff es ()
+removeFromWorld o = do
   when (occupiesTile o) $ #tileMap % #walkableTiles %= \wt -> wt // (position o, True)
-  let newPos = position o &
-        (case dir of
-          LeftDir -> _1 %~ subtract 1
-          RightDir -> _1 %~ (+1)
-          UpDir -> _2 %~ subtract 1
-          DownDir -> _2 %~ (+1)
-          UpRightDir -> (\(V2 x y) -> V2 (x+1) (y-1))
-          DownRightDir -> (\(V2 x y) -> V2 (x+1) (y+1))
-          UpLeftDir -> (\(V2 x y) -> V2 (x-1) (y-1))
-          DownLeftDir -> (\(V2 x y) -> V2 (x-1) (y+1))
-        )
-  modifyObject e (#position .~ newPos)
-  #dirtyViewsheds %= (e:)
+  #tileMap % #tileEntities % at (position o) % _Just %= S.delete (MobEntity (getID o))
 
 runLoop ::
   State World :> es
@@ -258,23 +267,64 @@ runLoop ::
 runLoop = do
   everyTurn
   vt <- getVisibleTiles
-  terminalClear
   renderMap vt
   renderObjects vt
   renderBottomTerminal
   terminalRefresh
+
   handleEvents Blocking $ \case
     Keypress kp -> do
       --putStrLn $ "Handling keypress: " <> show kp
       case asMovement kp of
         Just mvDir -> do
           pl <- use @World #player >>= getObject
-          void $ runRulebook Nothing moveRulebook (MoveArguments pl mvDir)
+          let ma = MoveArguments pl mvDir
+          join $ determineMovementIntention ma
+          --
         Nothing -> putStrLn ("unknown keypress: " <> show kp)
       when (kp == TkEsc) $ ((.=) @_ @Metadata) #pendingQuit True
     WindowEvent Resize -> pass
     WindowEvent WindowClose -> ((.=) @_ @Metadata) #pendingQuit True
   ifM (use @Metadata #pendingQuit) pass runLoop
+
+determineMovementIntention ::
+  IOE :> es
+  => ObjectQuery Object :> es
+  => State World :> es
+  => State Metadata :> es
+  => Breadcrumbs :> es
+  => MoveArguments -> Eff es (Eff es ())
+determineMovementIntention ma@(MoveArguments entity _) = do
+  let newLoc = simulateMove ma
+  mbThings <- filterMobTileEntities <$> getTileEntities newLoc
+  case mbThings of
+    [] -> return $ void $ runRulebook Nothing moveRulebook ma
+    x:_ -> return $ void $ attack entity x
+
+simulateMove :: MoveArguments -> V2
+simulateMove (MoveArguments o dir) =
+  position o &
+    (case dir of
+      LeftDir -> _1 %~ subtract 1
+      RightDir -> _1 %~ (+1)
+      UpDir -> _2 %~ subtract 1
+      DownDir -> _2 %~ (+1)
+      UpRightDir -> (\(V2 x y) -> V2 (x+1) (y-1))
+      DownRightDir -> (\(V2 x y) -> V2 (x+1) (y+1))
+      UpLeftDir -> (\(V2 x y) -> V2 (x-1) (y-1))
+      DownLeftDir -> (\(V2 x y) -> V2 (x-1) (y+1))
+    )
+
+filterMobTileEntities :: S.Set TileEntity -> [Entity]
+filterMobTileEntities = mapMaybe (preview _MobEntity) . S.toList
+
+getTileEntities :: State World :> es => V2 -> Eff es (S.Set TileEntity)
+getTileEntities pos = fromMaybe S.empty <$> use (#tileMap % #tileEntities % at pos)
+
+attack :: IOE :> es => Object -> Entity -> Eff es ()
+attack attacker defender = do
+  print "from hell's heart I stab at thee"
+
 
 getVisibleTiles ::
   ObjectQuery Object :> es
@@ -285,18 +335,12 @@ getVisibleTiles = do
   return (vs ^. #visibleTiles)
 
 renderBottomTerminal ::
-  State World :> es
-  => IOE :> es
+  IOE :> es
   => Eff es ()
 renderBottomTerminal = do
-  w <- get
-  clearViewport (w ^. #viewports % #bottomViewport)
-  withViewport (w ^. #viewports % #bottomViewport) $ do
-    borderViewport (Colour 0xFF999999) unicodeBorders
+  renderViewport bottomViewport $ do
     viewportDrawTile (V2 4 5) Nothing (Colour 0xFF6644AA) '?'
-  clearViewport (w ^. #viewports % #sideViewport)
-  withViewport (w ^. #viewports % #sideViewport) $ do
-    borderViewport (Colour 0xFF999999) unicodeBorders
+  renderViewport sideViewport $ do
     viewportDrawTile (V2 3 3) Nothing (Colour 0xFF6644AA) '!'
 
 renderMap ::
@@ -306,21 +350,21 @@ renderMap ::
   -> Eff es ()
 renderMap vt = do
   w <- get
-  clearViewport (w ^. #viewports % #mapViewport)
-  let es = w ^. #tileMap
-  traverseArrayWithCoord_ (es ^. #revealedTiles) $ \p rev -> when rev $ whenInViewport (w ^. #viewports % #mapViewport) p $ do
-    t <- use $ tile p
-    let r = t ^. #renderable
-    terminalColour (desaturate $ toGreyscale $ r ^. #foreground)
-    terminalBkColour (desaturate $ toGreyscale $ r ^. #background)
-    void $ withV2 p terminalPrintText (one $ r ^. #glyph)
-  forM_ vt $ \a -> whenInViewport (w ^. #viewports % #mapViewport) a $ do
-    t <- use $ tile a
-    let r = t ^. #renderable
-    terminalColour (r ^. #foreground)
-    terminalBkColour (r ^. #background)
-    --if (w ^. #tileMap % #walkableTiles) !@ a then terminalBkColour (Colour 0xFF0000FF) else terminalBkColour (Colour 0xFFFFFF44)
-    void $ withV2 a terminalPrintText (one $ r ^. #glyph)
+  renderViewport mapViewport $ do
+    let es = w ^. #tileMap
+    traverseArrayWithCoord_ (es ^. #revealedTiles) $ \p rev -> when rev $ whenInViewport mapViewport p $ do
+      t <- use $ tile p
+      let r = t ^. #renderable
+      terminalColour (desaturate $ toGreyscale $ r ^. #foreground)
+      terminalBkColour (desaturate $ toGreyscale $ r ^. #background)
+      void $ withV2 p terminalPrintText (one $ r ^. #glyph)
+    forM_ vt $ \a -> whenInViewport mapViewport a $ do
+      t <- use $ tile a
+      let r = t ^. #renderable
+      terminalColour (r ^. #foreground)
+      terminalBkColour (r ^. #background)
+      --if (w ^. #tileMap % #walkableTiles) !@ a then terminalBkColour (Colour 0xFF0000FF) else terminalBkColour (Colour 0xFFFFFF44)
+      void $ withV2 a terminalPrintText (one $ r ^. #glyph)
 
 renderObjects ::
   State World :> es
@@ -354,9 +398,7 @@ monstersThink = do
         when (p `S.member` visibleTiles v) $ do
           print $ view #name o <> " yells insults at you"
           m <- use @World #tileMap
-          print (V.length $ V.filter id $ toVector $ m ^. #walkableTiles)
           r <- findPath m (position o) p
-          print r
           case r of
             Just (nextStep:_:_) -> void $ runRulebook Nothing moveRulebook (MoveArguments o (directionFromPoints (position o) nextStep))
             _ -> pass
