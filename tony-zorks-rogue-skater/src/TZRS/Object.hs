@@ -7,7 +7,7 @@ import TZRS.Entity
 import Rogue.Colour
 import Rogue.FieldOfView.Visibility
 import Rogue.Property.Has
-import Rogue.ObjectQuery
+import Rogue.ObjectQuery ( HasSpecifics(..) )
 
 -- | Pointed set class; Monoid without the operation, or the dreaded default typeclass.
 class Pointed s where
