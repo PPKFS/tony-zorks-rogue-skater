@@ -35,7 +35,8 @@ common common-options
     vector,
     random,
     roguefunctor,
-    time
+    time,
+    aeson
 
   ghc-options:
     -Wall -Wcompat -Widentities -Wredundant-constraints
